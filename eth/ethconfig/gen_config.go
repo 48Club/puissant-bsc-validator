@@ -21,7 +21,6 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		Genesis                         *core.Genesis `toml:",omitempty"`
 		NetworkId                       uint64
 		SyncMode                        downloader.SyncMode
-		DisablePeerTxBroadcast          bool
 		EthDiscoveryURLs                []string
 		SnapDiscoveryURLs               []string
 		TrustDiscoveryURLs              []string
@@ -85,7 +84,6 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.Genesis = c.Genesis
 	enc.NetworkId = c.NetworkId
 	enc.SyncMode = c.SyncMode
-	enc.DisablePeerTxBroadcast = c.DisablePeerTxBroadcast
 	enc.EthDiscoveryURLs = c.EthDiscoveryURLs
 	enc.SnapDiscoveryURLs = c.SnapDiscoveryURLs
 	enc.TrustDiscoveryURLs = c.TrustDiscoveryURLs
@@ -152,7 +150,6 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		Genesis                         *core.Genesis `toml:",omitempty"`
 		NetworkId                       *uint64
 		SyncMode                        *downloader.SyncMode
-		DisablePeerTxBroadcast          *bool
 		EthDiscoveryURLs                []string
 		SnapDiscoveryURLs               []string
 		TrustDiscoveryURLs              []string
@@ -224,9 +221,6 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.SyncMode != nil {
 		c.SyncMode = *dec.SyncMode
-	}
-	if dec.DisablePeerTxBroadcast != nil {
-		c.DisablePeerTxBroadcast = *dec.DisablePeerTxBroadcast
 	}
 	if dec.EthDiscoveryURLs != nil {
 		c.EthDiscoveryURLs = dec.EthDiscoveryURLs

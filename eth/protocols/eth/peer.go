@@ -119,8 +119,6 @@ func NewPeer(version uint, p *p2p.Peer, rw p2p.MsgReadWriter, txpool TxPool) *Pe
 	}
 	// Start up all the broadcasters
 	go peer.broadcastBlocks()
-	go peer.broadcastTransactions()
-	go peer.announceTransactions()
 	go peer.dispatcher()
 	return peer
 }

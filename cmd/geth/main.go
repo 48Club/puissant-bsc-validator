@@ -99,7 +99,6 @@ var (
 		utils.TxPoolAccountQueueFlag,
 		utils.TxPoolGlobalQueueFlag,
 		utils.TxPoolLifetimeFlag,
-		utils.TxPoolReannounceTimeFlag,
 		utils.SyncModeFlag,
 		utils.TriesVerifyModeFlag,
 		utils.ExitWhenSyncedFlag,
