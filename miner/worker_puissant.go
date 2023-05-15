@@ -314,7 +314,7 @@ func (w *worker) sendMessage(text string, mute bool) {
 	}
 
 	var msg = fmt.Sprintf("*%s:* %s\n\n_%s_", w.nodeAlias, text, time.Now().Format(time.DateTime))
-	msgBody := tgbotapi.NewMessage(w.messengerGroupID, msg)
+	msgBody := tgbotapi.NewMessage(w.messengerToID, msg)
 	msgBody.ParseMode = "markdown"
 	msgBody.DisableWebPagePreview = true
 	msgBody.DisableNotification = mute

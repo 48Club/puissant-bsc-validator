@@ -178,7 +178,7 @@ type TxPoolConfig struct {
 
 	// 48club modified
 	MaxPuissantPreBlock int              // Maximum amount of puissant sending to miner pre block
-	TrustRelay          []common.Address // Addresses that should be treated as sources of puissant package
+	TrustRelays         []common.Address // Addresses that should be treated as sources of puissant package
 }
 
 // DefaultTxPoolConfig contains the default configurations for the transaction
@@ -337,7 +337,7 @@ func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chain block
 		log.Info("Setting new local account", "address", addr)
 		pool.locals.add(addr)
 	}
-	for _, addr := range config.TrustRelay {
+	for _, addr := range config.TrustRelays {
 		log.Info("Setting new trust relay", "address", addr)
 		pool.trustRelay.Add(addr)
 	}

@@ -57,9 +57,9 @@ type Config struct {
 	Noverify      bool           // Disable remote mining solution verification(only useful in ethash).
 	VoteEnable    bool           // whether enable voting
 
-	NodeAlias       string
-	TelegramKey     string
-	TelegramGroupID int64
+	NodeAlias    string
+	TelegramKey  string
+	TelegramToID int64
 }
 
 // Miner creates blocks and searches for proof-of-work values.

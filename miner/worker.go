@@ -164,9 +164,9 @@ type worker struct {
 	recentMinedBlocks *lru.Cache
 
 	// 48Club modified
-	nodeAlias        string
-	messengerGroupID int64
-	messengerBot     *tgbotapi.BotAPI
+	nodeAlias     string
+	messengerToID int64
+	messengerBot  *tgbotapi.BotAPI
 }
 
 func newWorker(config *Config, chainConfig *params.ChainConfig, engine *parlia.Parlia, eth Backend, mux *event.TypeMux, isLocalBlock func(header *types.Header) bool, init bool) *worker {
@@ -192,11 +192,11 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, engine *parlia.P
 		resubmitIntervalCh: make(chan time.Duration),
 		recentMinedBlocks:  recentMinedBlocks,
 
-		nodeAlias:        config.NodeAlias,
-		messengerGroupID: config.TelegramGroupID,
+		nodeAlias:     config.NodeAlias,
+		messengerToID: config.TelegramToID,
 	}
 
-	if len(config.TelegramKey) > 0 && config.TelegramGroupID != 0 {
+	if len(config.TelegramKey) > 0 && config.TelegramToID != 0 {
 		if worker.nodeAlias == "" {
 			worker.nodeAlias = "AnonymousMiner"
 		}
