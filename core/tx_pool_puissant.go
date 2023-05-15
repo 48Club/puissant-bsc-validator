@@ -1,20 +1,30 @@
-// Copyright 2014 The 48Club
-// This file is part of the puissant-bsc-validator library.
+/*
+	Copyright 2023 48Club
+
+	This file is part of the puissant-bsc-validator library and is intended for the implementation of puissant services.
+	Parts of the code in this file are derived from the go-ethereum library.
+	No one is authorized to copy, modify, or publish this file in any form without permission from 48Club.
+	Any unauthorized use of this file constitutes an infringement of copyright.
+*/
 
 package core
 
 import (
 	"errors"
+	"fmt"
+	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	"math/big"
 	"sort"
 
 	mapset "github.com/deckarep/golang-set/v2"
 )
 
-func (pool *TxPool) PendingTxsAndPuissant(blockTimestamp uint64) (map[common.Address]types.Transactions, types.PuissantPackages, int) {
+func (pool *TxPool) PendingTxsAndPuissant(blockTimestamp uint64, withPuissant bool) (map[common.Address]types.Transactions, types.PuissantPackages, int) {
 	var (
 		poolTx = make(map[common.Address]types.Transactions)
 		poolPx types.PuissantPackages
@@ -28,18 +38,20 @@ func (pool *TxPool) PendingTxsAndPuissant(blockTimestamp uint64) (map[common.Add
 		poolTx[addr] = list.Flatten()
 	}
 
-	for senderID, each := range pool.puissantPool {
-		if blockTimestamp > each.ExpireAt() {
-			delete(pool.puissantPool, senderID)
-			continue
+	if withPuissant {
+		for senderID, each := range pool.puissantPool {
+			if blockTimestamp > each.ExpireAt() {
+				delete(pool.puissantPool, senderID)
+				continue
+			}
+			poolPx = append(poolPx, each)
 		}
-		poolPx = append(poolPx, each)
-	}
-	sort.Sort(poolPx)
+		sort.Sort(poolPx)
 
-	for bundleIndex, each := range poolPx {
-		for _, tx := range each.Txs() {
-			tx.SetPuissantSeq(bundleIndex)
+		for bundleIndex, each := range poolPx {
+			for _, tx := range each.Txs() {
+				tx.SetPuissantSeq(bundleIndex)
+			}
 		}
 	}
 
@@ -49,7 +61,7 @@ func (pool *TxPool) PendingTxsAndPuissant(blockTimestamp uint64) (map[common.Add
 	return poolTx, poolPx[:pool.config.MaxPuissantPreBlock], level
 }
 
-func (pool *TxPool) AddPuissantPackage(txs types.Transactions, revertingTxHashes []common.Hash, maxTimestamp uint64) error {
+func (pool *TxPool) AddPuissantPackage(txs types.Transactions, revertingTxHashes []common.Hash, maxTimestamp uint64, relaySignature string) error {
 	if txCount := txs.Len(); txCount == 0 {
 		return errors.New("invalid")
 	} else if txCount > 1 && len(revertingTxHashes) >= txCount {
@@ -57,13 +69,13 @@ func (pool *TxPool) AddPuissantPackage(txs types.Transactions, revertingTxHashes
 	}
 
 	var (
-		txHash      = mapset.NewThreadUnsafeSet[common.Hash]()
-		revertible  = mapset.NewThreadUnsafeSet[common.Hash]()
-		tmpGasPrice *big.Int
-		senderID    common.Address
+		txHash        = mapset.NewThreadUnsafeSet[common.Hash]()
+		revertibleSet = mapset.NewThreadUnsafeSet[common.Hash]()
+		tmpGasPrice   *big.Int
+		senderID      common.Address
 	)
 	for _, each := range revertingTxHashes {
-		revertible.Add(each)
+		revertibleSet.Add(each)
 	}
 
 	pool.mu.Lock()
@@ -93,7 +105,7 @@ func (pool *TxPool) AddPuissantPackage(txs types.Transactions, revertingTxHashes
 			return errors.New("invalid, require txs descending sort by gas price")
 		}
 		tx.SetPuissantTxSeq(index)
-		if revertible.Contains(tx.Hash()) {
+		if revertibleSet.Contains(tx.Hash()) {
 			tx.SetPuissantAcceptReverting()
 		}
 	}
@@ -104,6 +116,9 @@ func (pool *TxPool) AddPuissantPackage(txs types.Transactions, revertingTxHashes
 
 	// pid should generate after tx revertible is set
 	puissantID := types.GenPuissantID(txs)
+	if err := pool.isFromTrustedRelay(puissantID, relaySignature); err != nil {
+		return err
+	}
 	for _, tx := range txs {
 		tx.SetPuissantID(puissantID)
 	}
@@ -154,6 +169,22 @@ func (pool *TxPool) demoteBundleLocked(noncer *txNoncerThreadUnsafe) {
 			delete(pool.puissantPool, senderID)
 		}
 	}
+}
+
+func (pool *TxPool) isFromTrustedRelay(pid types.PuissantID, relaySignature string) error {
+	rawSign, err := hexutil.Decode(relaySignature)
+	if err != nil {
+		return err
+	}
+	recovered, err := crypto.SigToPub(accounts.TextHash(pid[:]), rawSign)
+	if err != nil {
+		return err
+	}
+	relayAddr := crypto.PubkeyToAddress(*recovered)
+	if !pool.trustRelay.Contains(relayAddr) {
+		return fmt.Errorf("invalid relay address %s", relayAddr.String())
+	}
+	return nil
 }
 
 // validateTx checks whether a transaction is valid according to the consensus

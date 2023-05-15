@@ -348,6 +348,6 @@ func (b *LesApiBackend) StateAtTransaction(ctx context.Context, block *types.Blo
 
 // SendPuissant send a puissant package to the transaction pool, it doesn't work for light client
 // 48Club modified
-func (b *LesApiBackend) SendPuissant(ctx context.Context, txs types.Transactions, revertingTxHashes []common.Hash, maxTimestamp uint64) error {
+func (b *LesApiBackend) SendPuissant(ctx context.Context, txs types.Transactions, revertible []common.Hash, maxTimestamp uint64, relaySignature string) error {
 	return nil
 }

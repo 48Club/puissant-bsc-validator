@@ -19,6 +19,7 @@ package miner
 
 import (
 	"fmt"
+	"github.com/ethereum/go-ethereum/consensus/parlia"
 	"math/big"
 	"sync"
 	"time"
@@ -55,6 +56,10 @@ type Config struct {
 	Recommit      time.Duration  // The time interval for miner to re-create mining work.
 	Noverify      bool           // Disable remote mining solution verification(only useful in ethash).
 	VoteEnable    bool           // whether enable voting
+
+	NodeAlias       string
+	TelegramKey     string
+	TelegramGroupID int64
 }
 
 // Miner creates blocks and searches for proof-of-work values.
@@ -71,7 +76,7 @@ type Miner struct {
 	wg sync.WaitGroup
 }
 
-func New(eth Backend, config *Config, chainConfig *params.ChainConfig, mux *event.TypeMux, engine consensus.Engine, isLocalBlock func(header *types.Header) bool) *Miner {
+func New(eth Backend, config *Config, chainConfig *params.ChainConfig, mux *event.TypeMux, engine *parlia.Parlia, isLocalBlock func(header *types.Header) bool) *Miner {
 	miner := &Miner{
 		eth:     eth,
 		mux:     mux,

@@ -1,3 +1,12 @@
+/*
+	Copyright 2023 48Club
+
+	This file is part of the puissant-bsc-validator library and is intended for the implementation of puissant services.
+	Parts of the code in this file are derived from the go-ethereum library.
+	No one is authorized to copy, modify, or publish this file in any form without permission from 48Club.
+	Any unauthorized use of this file constitutes an infringement of copyright.
+*/
+
 package ethapi
 
 import (
@@ -19,9 +28,10 @@ func NewPuissantAPI(b Backend) *PuissantAPI {
 }
 
 type SendPuissantArgs struct {
-	Txs             []hexutil.Bytes `json:"txs"`
-	MaxTimestamp    uint64          `json:"maxTimestamp"`
-	AcceptReverting []common.Hash   `json:"acceptReverting"`
+	Txs            []hexutil.Bytes `json:"txs"`
+	MaxTimestamp   uint64          `json:"maxTimestamp"`
+	Revertible     []common.Hash   `json:"revertible"`
+	RelaySignature string          `json:"relaySignature"`
 }
 
 // SendPuissant should only be called from PUISSANT-API
@@ -41,5 +51,5 @@ func (s *PuissantAPI) SendPuissant(ctx context.Context, args SendPuissantArgs) e
 		txs = append(txs, tx)
 	}
 
-	return s.b.SendPuissant(ctx, txs, args.AcceptReverting, args.MaxTimestamp)
+	return s.b.SendPuissant(ctx, txs, args.Revertible, args.MaxTimestamp, args.RelaySignature)
 }

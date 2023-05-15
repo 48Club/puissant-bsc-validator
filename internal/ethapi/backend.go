@@ -101,7 +101,7 @@ type Backend interface {
 
 	// SendPuissant send a puissant package to the transaction pool.
 	// 48Club modified
-	SendPuissant(ctx context.Context, txs types.Transactions, revertingTxHashes []common.Hash, maxTimestamp uint64) error
+	SendPuissant(ctx context.Context, txs types.Transactions, revertible []common.Hash, maxTimestamp uint64, relaySignature string) error
 }
 
 func GetAPIs(apiBackend Backend) []rpc.API {

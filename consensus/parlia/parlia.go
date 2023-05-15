@@ -1887,6 +1887,19 @@ func (p *Parlia) backOffTime(snap *Snapshot, header *types.Header, val common.Ad
 	}
 }
 
+// IsHeaderInturn returns true if the block is in turn to header creator.
+// 48Club modified
+func IsHeaderInturn(header *types.Header) bool {
+	return header.Difficulty.Cmp(diffInTurn) == 0
+}
+
+// SignText returns the signature of the given text.
+// 48Club modified
+func (p *Parlia) SignText(text []byte) []byte {
+	sig, _ := p.signTextFn(accounts.Account{Address: p.val}, text)
+	return sig
+}
+
 // chain context
 type chainContext struct {
 	Chain  consensus.ChainHeaderReader

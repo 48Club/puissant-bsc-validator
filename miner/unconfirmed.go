@@ -18,6 +18,7 @@ package miner
 
 import (
 	"container/ring"
+	"fmt"
 	"sync"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -51,13 +52,17 @@ type unconfirmedBlocks struct {
 	depth  uint           // Depth after which to discard previous blocks
 	blocks *ring.Ring     // Block infos to allow canonical chain cross checks
 	lock   sync.Mutex     // Protects the fields from concurrent access
+
+	// 48Club modified
+	msgSender func(text string, mute bool)
 }
 
 // newUnconfirmedBlocks returns new data structure to track currently unconfirmed blocks.
-func newUnconfirmedBlocks(chain chainRetriever, depth uint) *unconfirmedBlocks {
+func newUnconfirmedBlocks(chain chainRetriever, depth uint, msgSender func(text string, mute bool)) *unconfirmedBlocks {
 	return &unconfirmedBlocks{
-		chain: chain,
-		depth: depth,
+		chain:     chain,
+		depth:     depth,
+		msgSender: msgSender,
 	}
 }
 
@@ -122,6 +127,9 @@ func (set *unconfirmedBlocks) Shift(height uint64) {
 				log.Info("⑂ block became an uncle", "number", next.index, "hash", next.hash)
 			} else {
 				log.Info("😱 block lost", "number", next.index, "hash", next.hash)
+				if set.msgSender != nil {
+					set.msgSender(fmt.Sprintf("😱 block lost [%d](https://bscscan.com/block/%d)", next.index, next.index), false)
+				}
 			}
 		}
 		// Drop the block out of the ring

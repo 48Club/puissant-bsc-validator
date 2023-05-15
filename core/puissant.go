@@ -1,3 +1,12 @@
+/*
+	Copyright 2023 48Club
+
+	This file is part of the puissant-bsc-validator library and is intended for the implementation of puissant services.
+	Parts of the code in this file are derived from the go-ethereum library.
+	No one is authorized to copy, modify, or publish this file in any form without permission from 48Club.
+	Any unauthorized use of this file constitutes an infringement of copyright.
+*/
+
 package core
 
 import (
@@ -8,7 +17,6 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
-	lru "github.com/hashicorp/golang-lru"
 	"math/big"
 	"strings"
 	"time"
@@ -37,7 +45,7 @@ func RunPuissantCommitter(
 	chainConfig *params.ChainConfig,
 	poolRemoveFn func(mapset.Set[types.PuissantID]),
 
-	packedPuissantTxs *lru.Cache,
+	recentPacked mapset.Set[common.Hash],
 ) ([]*CommitterReport, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeLeft)
 	defer cancel()
@@ -83,10 +91,9 @@ func RunPuissantCommitter(
 		if tx == nil {
 			return committer.finalStatistics(false)
 		}
-		if _, exist := packedPuissantTxs.Get(tx.Hash()); exist {
+		if recentPacked.Contains(tx.Hash()) {
 			log.Warn(" 👮 tx already packed", "tx", tx.Hash())
 			if tx.IsPuissant() {
-				committer.failedGroup.Add(tx.PuissantID())
 				return nil, errors.New("👮 previous packed puissant included, abort this round")
 			}
 			workerEnv.PuissantTxQueue.Shift()

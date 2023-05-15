@@ -1,3 +1,12 @@
+/*
+	Copyright 2023 48Club
+
+	This file is part of the puissant-bsc-validator library and is intended for the implementation of puissant services.
+	Parts of the code in this file are derived from the go-ethereum library.
+	No one is authorized to copy, modify, or publish this file in any form without permission from 48Club.
+	Any unauthorized use of this file constitutes an infringement of copyright.
+*/
+
 package core
 
 import (

@@ -19,6 +19,7 @@ package core
 import (
 	"container/heap"
 	"errors"
+	mapset "github.com/deckarep/golang-set/v2"
 	"math"
 	"math/big"
 	"sort"
@@ -176,7 +177,8 @@ type TxPoolConfig struct {
 	Lifetime time.Duration // Maximum amount of time non-executable transaction are queued
 
 	// 48club modified
-	MaxPuissantPreBlock int // Maximum amount of puissant sending to miner pre block
+	MaxPuissantPreBlock int              // Maximum amount of puissant sending to miner pre block
+	TrustRelay          []common.Address // Addresses that should be treated as sources of puissant package
 }
 
 // DefaultTxPoolConfig contains the default configurations for the transaction
@@ -294,6 +296,9 @@ type TxPool struct {
 	// puissantPool is a map of puissant packages, key is bnb payment sender address
 	// (to avoid multiple sending, only one pending-puissant is allowed for each sender)
 	puissantPool map[common.Address]*types.PuissantPackage
+
+	// trustRelay is a map of trust relay
+	trustRelay mapset.Set[common.Address]
 }
 
 type txpoolResetRequest struct {
@@ -325,12 +330,18 @@ func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chain block
 		initDoneCh:      make(chan struct{}),
 		gasPrice:        new(big.Int).SetUint64(config.PriceLimit),
 		puissantPool:    make(map[common.Address]*types.PuissantPackage),
+		trustRelay:      mapset.NewSet[common.Address](),
 	}
 	pool.locals = newAccountSet(pool.signer)
 	for _, addr := range config.Locals {
 		log.Info("Setting new local account", "address", addr)
 		pool.locals.add(addr)
 	}
+	for _, addr := range config.TrustRelay {
+		log.Info("Setting new trust relay", "address", addr)
+		pool.trustRelay.Add(addr)
+	}
+
 	pool.priced = newTxPricedList(pool.all)
 	pool.reset(nil, chain.CurrentBlock().Header())
 

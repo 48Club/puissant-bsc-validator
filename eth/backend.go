@@ -30,8 +30,6 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/consensus"
-	"github.com/ethereum/go-ethereum/consensus/beacon"
-	"github.com/ethereum/go-ethereum/consensus/clique"
 	"github.com/ethereum/go-ethereum/consensus/parlia"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/bloombits"
@@ -86,7 +84,7 @@ type Ethereum struct {
 	chainDb ethdb.Database // Block chain database
 
 	eventMux       *event.TypeMux
-	engine         consensus.Engine
+	engine         *parlia.Parlia
 	accountManager *accounts.Manager
 
 	bloomRequests     chan chan *bloombits.Retrieval // Channel receiving bloom data retrieval requests
@@ -180,7 +178,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		log.Info("Unprotected transactions allowed")
 	}
 	ethAPI := ethapi.NewPublicBlockChainAPI(eth.APIBackend)
-	eth.engine = ethconfig.CreateConsensusEngine(stack, chainConfig, &ethashConfig, config.Miner.Notify, config.Miner.Noverify, chainDb, ethAPI, genesisHash)
+	eth.engine = parlia.New(chainConfig, chainDb, ethAPI, genesisHash)
 
 	bcVersion := rawdb.ReadDatabaseVersion(chainDb)
 	var dbVer = "<nil>"
@@ -250,28 +248,22 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	eth.txPool = core.NewTxPool(config.TxPool, chainConfig, eth.blockchain)
 
 	// Create voteManager instance
-	if posa, ok := eth.engine.(consensus.PoSA); ok {
-		// Create votePool instance
-		votePool := vote.NewVotePool(chainConfig, eth.blockchain, posa)
-		eth.votePool = votePool
-		if parlia, ok := eth.engine.(*parlia.Parlia); ok {
-			parlia.VotePool = votePool
-		} else {
-			return nil, fmt.Errorf("Engine is not Parlia type")
-		}
-		log.Info("Create votePool successfully")
+	// Create votePool instance
+	votePool := vote.NewVotePool(chainConfig, eth.blockchain, eth.engine)
+	eth.votePool = votePool
+	eth.engine.VotePool = votePool
+	log.Info("Create votePool successfully")
 
-		if config.Miner.VoteEnable {
-			conf := stack.Config()
-			blsPasswordPath := stack.ResolvePath(conf.BLSPasswordFile)
-			blsWalletPath := stack.ResolvePath(conf.BLSWalletDir)
-			voteJournalPath := stack.ResolvePath(conf.VoteJournalDir)
-			if _, err := vote.NewVoteManager(eth.EventMux(), chainConfig, eth.blockchain, votePool, voteJournalPath, blsPasswordPath, blsWalletPath, posa); err != nil {
-				log.Error("Failed to Initialize voteManager", "err", err)
-				return nil, err
-			}
-			log.Info("Create voteManager successfully")
+	if config.Miner.VoteEnable {
+		conf := stack.Config()
+		blsPasswordPath := stack.ResolvePath(conf.BLSPasswordFile)
+		blsWalletPath := stack.ResolvePath(conf.BLSWalletDir)
+		voteJournalPath := stack.ResolvePath(conf.VoteJournalDir)
+		if _, err := vote.NewVoteManager(eth.EventMux(), chainConfig, eth.blockchain, votePool, voteJournalPath, blsPasswordPath, blsWalletPath, eth.engine); err != nil {
+			log.Error("Failed to Initialize voteManager", "err", err)
+			return nil, err
 		}
+		log.Info("Create voteManager successfully")
 	}
 
 	// Permit the downloader to use the trie cache allowance during fast sync
@@ -497,13 +489,7 @@ func (s *Ethereum) shouldPreserve(header *types.Header) bool {
 	// is A, F and G sign the block of round5 and reject the block of opponents
 	// and in the round6, the last available signer B is offline, the whole
 	// network is stuck.
-	if _, ok := s.engine.(*clique.Clique); ok {
-		return false
-	}
-	if _, ok := s.engine.(*parlia.Parlia); ok {
-		return false
-	}
-	return s.isLocalBlock(header)
+	return false
 }
 
 // SetEtherbase sets the mining reward address.
@@ -519,17 +505,6 @@ func (s *Ethereum) SetEtherbase(etherbase common.Address) {
 // is already running, this method adjust the number of threads allowed to use
 // and updates the minimum price required by the transaction pool.
 func (s *Ethereum) StartMining(threads int) error {
-	// Update the thread count within the consensus engine
-	type threaded interface {
-		SetThreads(threads int)
-	}
-	if th, ok := s.engine.(threaded); ok {
-		log.Info("Updated mining threads", "threads", threads)
-		if threads == 0 {
-			threads = -1 // Disable the miner from within
-		}
-		th.SetThreads(threads)
-	}
 	// If the miner was not running, initialize it
 	if !s.IsMining() {
 		// Propagate the initial price point to the transaction pool
@@ -544,31 +519,14 @@ func (s *Ethereum) StartMining(threads int) error {
 			log.Error("Cannot start mining without etherbase", "err", err)
 			return fmt.Errorf("etherbase missing: %v", err)
 		}
-		var cli *clique.Clique
-		if c, ok := s.engine.(*clique.Clique); ok {
-			cli = c
-		} else if cl, ok := s.engine.(*beacon.Beacon); ok {
-			if c, ok := cl.InnerEngine().(*clique.Clique); ok {
-				cli = c
-			}
-		}
-		if cli != nil {
-			wallet, err := s.accountManager.Find(accounts.Account{Address: eb})
-			if wallet == nil || err != nil {
-				log.Error("Etherbase account unavailable locally", "err", err)
-				return fmt.Errorf("signer missing: %v", err)
-			}
-			cli.Authorize(eb, wallet.SignData)
-		}
-		if parlia, ok := s.engine.(*parlia.Parlia); ok {
-			wallet, err := s.accountManager.Find(accounts.Account{Address: eb})
-			if wallet == nil || err != nil {
-				log.Error("Etherbase account unavailable locally", "err", err)
-				return fmt.Errorf("signer missing: %v", err)
-			}
 
-			parlia.Authorize(eb, wallet.SignData, wallet.SignTx, wallet.SignText)
+		wallet, err := s.accountManager.Find(accounts.Account{Address: eb})
+		if wallet == nil || err != nil {
+			log.Error("Etherbase account unavailable locally", "err", err)
+			return fmt.Errorf("signer missing: %v", err)
 		}
+		s.engine.Authorize(eb, wallet.SignData, wallet.SignTx, wallet.SignText)
+
 		// If mining is started, we can disable the transaction rejection mechanism
 		// introduced to speed sync times.
 		atomic.StoreUint32(&s.handler.acceptTxs, 1)
@@ -581,13 +539,6 @@ func (s *Ethereum) StartMining(threads int) error {
 // StopMining terminates the miner, both at the consensus engine level as well as
 // at the block creation level.
 func (s *Ethereum) StopMining() {
-	// Update the thread count within the consensus engine
-	type threaded interface {
-		SetThreads(threads int)
-	}
-	if th, ok := s.engine.(threaded); ok {
-		th.SetThreads(-1)
-	}
 	// Stop the block creating itself
 	s.miner.Stop()
 }
