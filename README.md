@@ -6,6 +6,10 @@ The repo is modified and aiming to implement the puissant service. It is for val
 
 We guarantee that the repo follows every bnb-chain/bsc new release ASAP.
 
+You can always [compare](https://github.com/bnb-chain/bsc/compare/master...48Club:puissant-bsc-validator:develop) the code with bnb-chain/bsc:master to check the difference.
+
+Contributions are welcome.
+
 ### Mainly changes for 48Club puissant service
 - **Stop sharing transactions with connected peers**
 - **Share local mined block with all peers instead of part of peers**
