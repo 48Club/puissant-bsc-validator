@@ -174,6 +174,9 @@ type TxPoolConfig struct {
 	GlobalQueue  uint64 // Maximum number of non-executable transaction slots for all accounts
 
 	Lifetime time.Duration // Maximum amount of time non-executable transaction are queued
+
+	// 48club modified
+	MaxPuissantPreBlock int // Maximum amount of puissant sending to miner pre block
 }
 
 // DefaultTxPoolConfig contains the default configurations for the transaction
@@ -191,6 +194,8 @@ var DefaultTxPoolConfig = TxPoolConfig{
 	GlobalQueue:  1024,
 
 	Lifetime: 3 * time.Hour,
+
+	MaxPuissantPreBlock: 25,
 }
 
 // sanitize checks the provided user configurations and changes anything that's
@@ -228,6 +233,12 @@ func (config *TxPoolConfig) sanitize() TxPoolConfig {
 	if conf.Lifetime < 1 {
 		log.Warn("Sanitizing invalid txpool lifetime", "provided", conf.Lifetime, "updated", DefaultTxPoolConfig.Lifetime)
 		conf.Lifetime = DefaultTxPoolConfig.Lifetime
+	}
+
+	// 48club modified
+	if conf.MaxPuissantPreBlock < 1 {
+		log.Warn("Sanitizing invalid puissant feed limit", "provided", conf.MaxPuissantPreBlock, "updated", DefaultTxPoolConfig.MaxPuissantPreBlock)
+		conf.MaxPuissantPreBlock = DefaultTxPoolConfig.MaxPuissantPreBlock
 	}
 	return conf
 }
@@ -277,6 +288,12 @@ type TxPool struct {
 	initDoneCh      chan struct{}  // is closed once the pool is initialized (for tests)
 
 	changesSinceReorg int // A counter for how many drops we've performed in-between reorg.
+
+	// 48club modified
+
+	// puissantPool is a map of puissant packages, key is bnb payment sender address
+	// (to avoid multiple sending, only one pending-puissant is allowed for each sender)
+	puissantPool map[common.Address]*types.PuissantPackage
 }
 
 type txpoolResetRequest struct {
@@ -307,6 +324,7 @@ func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chain block
 		reorgShutdownCh: make(chan struct{}),
 		initDoneCh:      make(chan struct{}),
 		gasPrice:        new(big.Int).SetUint64(config.PriceLimit),
+		puissantPool:    make(map[common.Address]*types.PuissantPackage),
 	}
 	pool.locals = newAccountSet(pool.signer)
 	for _, addr := range config.Locals {
@@ -1253,7 +1271,10 @@ func (pool *TxPool) runReorg(done chan struct{}, reset *txpoolResetRequest, dirt
 	// remove any transaction that has been included in the block or was invalidated
 	// because of another transaction (e.g. higher gas price).
 	if reset != nil {
-		pool.demoteUnexecutables()
+		fastNoncer := newTxNoncerThreadUnsafe(pool.currentState)
+		pool.demoteUnexecutables(fastNoncer)
+		pool.demoteBundleLocked(fastNoncer)
+
 		if reset.newHead != nil {
 			if pool.chainconfig.IsLondon(new(big.Int).Add(reset.newHead.Number, big.NewInt(1))) {
 				// london fork enabled, reset given the base fee
@@ -1594,10 +1615,10 @@ func (pool *TxPool) truncateQueue() {
 // Note: transactions are not marked as removed in the priced list because re-heaping
 // is always explicitly triggered by SetBaseFee and it would be unnecessary and wasteful
 // to trigger a re-heap is this function
-func (pool *TxPool) demoteUnexecutables() {
+func (pool *TxPool) demoteUnexecutables(noncer *txNoncerThreadUnsafe) {
 	// Iterate over all accounts and demote any non-executable transactions
 	for addr, list := range pool.pending {
-		nonce := pool.currentState.GetNonce(addr)
+		nonce := noncer.get(addr)
 
 		// Drop all transactions that are deemed too old (low nonce)
 		olds := list.Forward(nonce)

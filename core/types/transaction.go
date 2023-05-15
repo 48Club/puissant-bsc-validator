@@ -56,6 +56,12 @@ type Transaction struct {
 	hash atomic.Value
 	size atomic.Value
 	from atomic.Value
+
+	// 48club modified
+	puissantID      PuissantID
+	puissantSeq     int
+	puissantTxSeq   int
+	acceptReverting bool
 }
 
 // NewTx creates a new transaction.
@@ -90,6 +96,42 @@ type TxData interface {
 // Time returns transaction's time
 func (tx *Transaction) Time() time.Time {
 	return tx.time
+}
+
+func (tx *Transaction) SetTime(t time.Time) {
+	tx.time = t
+}
+
+func (tx *Transaction) PuissantInfo() (PuissantID, int, int) {
+	return tx.puissantID, tx.puissantSeq, tx.puissantTxSeq
+}
+
+func (tx *Transaction) IsPuissant() bool {
+	return tx.puissantID.IsPuissant()
+}
+
+func (tx *Transaction) PuissantID() PuissantID {
+	return tx.puissantID
+}
+
+func (tx *Transaction) AcceptsReverting() bool {
+	return tx.acceptReverting
+}
+
+func (tx *Transaction) SetPuissantTxSeq(txSeq int) {
+	tx.puissantTxSeq = txSeq
+}
+
+func (tx *Transaction) SetPuissantAcceptReverting() {
+	tx.acceptReverting = true
+}
+
+func (tx *Transaction) SetPuissantID(id PuissantID) {
+	tx.puissantID = id
+}
+
+func (tx *Transaction) SetPuissantSeq(seq int) {
+	tx.puissantSeq = seq
 }
 
 // EncodeRLP implements rlp.Encoder

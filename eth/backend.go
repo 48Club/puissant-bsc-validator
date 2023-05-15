@@ -567,7 +567,7 @@ func (s *Ethereum) StartMining(threads int) error {
 				return fmt.Errorf("signer missing: %v", err)
 			}
 
-			parlia.Authorize(eb, wallet.SignData, wallet.SignTx)
+			parlia.Authorize(eb, wallet.SignData, wallet.SignTx, wallet.SignText)
 		}
 		// If mining is started, we can disable the transaction rejection mechanism
 		// introduced to speed sync times.

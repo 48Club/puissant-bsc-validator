@@ -616,3 +616,15 @@ func (ps *peerSet) close() {
 	}
 	ps.closed = true
 }
+
+// allPeers retrieves all peers
+func (ps *peerSet) allPeers() []*ethPeer {
+	ps.lock.RLock()
+	defer ps.lock.RUnlock()
+
+	list := make([]*ethPeer, 0, len(ps.peers))
+	for _, p := range ps.peers {
+		list = append(list, p)
+	}
+	return list
+}

@@ -273,6 +273,12 @@ func (b *EthAPIBackend) SendTx(ctx context.Context, signedTx *types.Transaction)
 	return b.eth.txPool.AddLocal(signedTx)
 }
 
+// SendPuissant send a puissant package to the transaction pool.
+// 48Club modified
+func (b *EthAPIBackend) SendPuissant(ctx context.Context, txs types.Transactions, revertingTxHashes []common.Hash, maxTimestamp uint64) error {
+	return b.eth.txPool.AddPuissantPackage(txs, revertingTxHashes, maxTimestamp)
+}
+
 func (b *EthAPIBackend) GetPoolTransactions() (types.Transactions, error) {
 	pending := b.eth.txPool.Pending(false)
 	var txs types.Transactions

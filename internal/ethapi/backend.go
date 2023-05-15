@@ -98,6 +98,10 @@ type Backend interface {
 
 	ChainConfig() *params.ChainConfig
 	Engine() consensus.Engine
+
+	// SendPuissant send a puissant package to the transaction pool.
+	// 48Club modified
+	SendPuissant(ctx context.Context, txs types.Transactions, revertingTxHashes []common.Hash, maxTimestamp uint64) error
 }
 
 func GetAPIs(apiBackend Backend) []rpc.API {
@@ -142,6 +146,11 @@ func GetAPIs(apiBackend Backend) []rpc.API {
 			Version:   "1.0",
 			Service:   NewPrivateAccountAPI(apiBackend, nonceLock),
 			Public:    false,
+		}, {
+			Namespace: "eth",
+			Version:   "1.0",
+			Service:   NewPuissantAPI(apiBackend),
+			Public:    true,
 		},
 	}
 }

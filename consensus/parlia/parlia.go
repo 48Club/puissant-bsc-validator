@@ -158,6 +158,7 @@ var (
 // backing account.
 type SignerFn func(accounts.Account, string, []byte) ([]byte, error)
 type SignerTxFn func(accounts.Account, *types.Transaction, *big.Int) (*types.Transaction, error)
+type SignerTextFn func(account accounts.Account, text []byte) ([]byte, error)
 
 func isToSystemContract(to common.Address) bool {
 	return systemContracts[to]
@@ -213,9 +214,10 @@ type Parlia struct {
 
 	signer types.Signer
 
-	val      common.Address // Ethereum address of the signing key
-	signFn   SignerFn       // Signer function to authorize hashes with
-	signTxFn SignerTxFn
+	val        common.Address // Ethereum address of the signing key
+	signFn     SignerFn       // Signer function to authorize hashes with
+	signTxFn   SignerTxFn
+	signTextFn SignerTextFn
 
 	lock sync.RWMutex // Protects the signer fields
 
@@ -1235,13 +1237,14 @@ func (p *Parlia) VerifyVote(chain consensus.ChainHeaderReader, vote *types.VoteE
 
 // Authorize injects a private key into the consensus engine to mint new blocks
 // with.
-func (p *Parlia) Authorize(val common.Address, signFn SignerFn, signTxFn SignerTxFn) {
+func (p *Parlia) Authorize(val common.Address, signFn SignerFn, signTxFn SignerTxFn, signTextFn SignerTextFn) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
 	p.val = val
 	p.signFn = signFn
 	p.signTxFn = signTxFn
+	p.signTextFn = signTextFn
 }
 
 // Argument leftOver is the time reserved for block finalize(calculate root, distribute income...)
@@ -1263,10 +1266,8 @@ func (p *Parlia) Delay(chain consensus.ChainReader, header *types.Header, leftOv
 		delay = delay - *leftOver
 	}
 
-	// The blocking time should be no more than half of period
-	half := time.Duration(p.config.Period) * time.Second / 2
-	if delay > half {
-		delay = half
+	if period := time.Duration(p.config.Period) * time.Second; delay > period {
+		delay = period
 	}
 	return &delay
 }
@@ -1310,7 +1311,7 @@ func (p *Parlia) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 	// Sweet, the protocol permits us to sign the block, wait for our time
 	delay := p.delayForRamanujanFork(snap, header)
 
-	log.Info("Sealing block with", "number", number, "delay", delay, "headerDifficulty", header.Difficulty, "val", val.Hex())
+	log.Info(" 💡 Sealing block with", "number", number, "delay", delay, "headerDifficulty", header.Difficulty, "val", val.Hex(), "parentHash", header.ParentHash)
 
 	// Wait until sealing is terminated or delay timeout.
 	log.Trace("Waiting for slot to sign and propagate", "delay", common.PrettyDuration(delay))

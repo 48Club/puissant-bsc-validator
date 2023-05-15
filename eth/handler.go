@@ -832,8 +832,17 @@ func (h *handler) minedBroadcastLoop() {
 
 	for obj := range h.minedBlockSub.Chan() {
 		if ev, ok := obj.Data.(core.NewMinedBlockEvent); ok {
-			h.BroadcastBlock(ev.Block, true)  // First propagate block to peers
-			h.BroadcastBlock(ev.Block, false) // Only then announce to the rest
+			parentTD := h.chain.GetTd(ev.Block.ParentHash(), ev.Block.NumberU64()-1)
+			if parentTD == nil {
+				continue
+			}
+
+			td := new(big.Int).Add(ev.Block.Difficulty(), parentTD)
+			peers := h.peers.allPeers()
+			for _, peer := range peers {
+				peer.AsyncSendNewBlock(ev.Block, td)
+			}
+			log.Info(" 🌈 mined block broadcast", "block", ev.Block.NumberU64(), "toPeers", len(peers))
 		}
 	}
 }
