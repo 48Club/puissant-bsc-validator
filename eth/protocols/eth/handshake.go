@@ -17,7 +17,6 @@
 package eth
 
 import (
-	"errors"
 	"fmt"
 	"math/big"
 	"time"
@@ -107,7 +106,8 @@ func (p *Peer) Handshake(network uint64, td *big.Int, head common.Hash, genesis 
 		p.statusExtension = extension
 
 		if p.statusExtension.DisablePeerTxBroadcast {
-			return errors.New("un-welcomed peer")
+			p.Log().Debug("peer does not need broadcast txs, closing broadcast routines")
+			p.CloseTxBroadcast()
 		}
 	}
 

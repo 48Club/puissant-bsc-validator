@@ -84,6 +84,10 @@ type txPool interface {
 	// SubscribeNewTxsEvent should return an event subscription of
 	// NewTxsEvent and send events to the given channel.
 	SubscribeNewTxsEvent(chan<- core.NewTxsEvent) event.Subscription
+
+	// SubscribeReannoTxsEvent should return an event subscription of
+	// ReannoTxsEvent and send events to the given channel.
+	SubscribeReannoTxsEvent(chan<- core.ReannoTxsEvent) event.Subscription
 }
 
 // votePool defines the methods needed from a votes pool implementation to
@@ -100,25 +104,27 @@ type votePool interface {
 // handlerConfig is the collection of initialization parameters to create a full
 // node network handler.
 type handlerConfig struct {
-	Database        ethdb.Database   // Database for direct sync insertions
-	Chain           *core.BlockChain // Blockchain to serve data from
-	TxPool          txPool           // Transaction pool to propagate from
-	VotePool        votePool
-	Merger          *consensus.Merger         // The manager for eth1/2 transition
-	Network         uint64                    // Network identifier to adfvertise
-	Sync            downloader.SyncMode       // Whether to snap or full sync
-	DiffSync        bool                      // Whether to diff sync
-	BloomCache      uint64                    // Megabytes to alloc for snap sync bloom
-	EventMux        *event.TypeMux            // Legacy event mux, deprecate for `feed`
-	Checkpoint      *params.TrustedCheckpoint // Hard coded checkpoint for sync challenges
-	Whitelist       map[uint64]common.Hash    // Hard coded whitelist for sync challenged
-	DirectBroadcast bool
-	PeerSet         *peerSet
+	Database               ethdb.Database   // Database for direct sync insertions
+	Chain                  *core.BlockChain // Blockchain to serve data from
+	TxPool                 txPool           // Transaction pool to propagate from
+	VotePool               votePool
+	Merger                 *consensus.Merger         // The manager for eth1/2 transition
+	Network                uint64                    // Network identifier to adfvertise
+	Sync                   downloader.SyncMode       // Whether to snap or full sync
+	DiffSync               bool                      // Whether to diff sync
+	BloomCache             uint64                    // Megabytes to alloc for snap sync bloom
+	EventMux               *event.TypeMux            // Legacy event mux, deprecate for `feed`
+	Checkpoint             *params.TrustedCheckpoint // Hard coded checkpoint for sync challenges
+	Whitelist              map[uint64]common.Hash    // Hard coded whitelist for sync challenged
+	DirectBroadcast        bool
+	DisablePeerTxBroadcast bool
+	PeerSet                *peerSet
 }
 
 type handler struct {
-	networkID  uint64
-	forkFilter forkid.Filter // Fork ID filter, constant across the lifetime of the node
+	networkID              uint64
+	forkFilter             forkid.Filter // Fork ID filter, constant across the lifetime of the node
+	disablePeerTxBroadcast bool
 
 	snapSync        uint32 // Flag whether snap sync is enabled (gets disabled if we already have blocks)
 	acceptTxs       uint32 // Flag whether we're considered synchronised (enables transaction processing)
@@ -142,6 +148,10 @@ type handler struct {
 	merger       *consensus.Merger
 
 	eventMux      *event.TypeMux
+	txsCh         chan core.NewTxsEvent
+	txsSub        event.Subscription
+	reannoTxsCh   chan core.ReannoTxsEvent
+	reannoTxsSub  event.Subscription
 	minedBlockSub *event.TypeMuxSubscription
 	voteCh        chan core.NewVoteEvent
 	votesSub      event.Subscription
@@ -166,19 +176,20 @@ func newHandler(config *handlerConfig) (*handler, error) {
 		config.PeerSet = newPeerSet() // Nicety initialization for tests
 	}
 	h := &handler{
-		networkID:       config.Network,
-		forkFilter:      forkid.NewFilter(config.Chain),
-		eventMux:        config.EventMux,
-		database:        config.Database,
-		txpool:          config.TxPool,
-		votepool:        config.VotePool,
-		chain:           config.Chain,
-		peers:           config.PeerSet,
-		merger:          config.Merger,
-		whitelist:       config.Whitelist,
-		directBroadcast: config.DirectBroadcast,
-		diffSync:        config.DiffSync,
-		quitSync:        make(chan struct{}),
+		networkID:              config.Network,
+		forkFilter:             forkid.NewFilter(config.Chain),
+		disablePeerTxBroadcast: config.DisablePeerTxBroadcast,
+		eventMux:               config.EventMux,
+		database:               config.Database,
+		txpool:                 config.TxPool,
+		votepool:               config.VotePool,
+		chain:                  config.Chain,
+		peers:                  config.PeerSet,
+		merger:                 config.Merger,
+		whitelist:              config.Whitelist,
+		directBroadcast:        config.DirectBroadcast,
+		diffSync:               config.DiffSync,
+		quitSync:               make(chan struct{}),
 	}
 	if config.Sync == downloader.FullSync {
 		// The database seems empty as the current block is the genesis. Yet the snap
@@ -360,7 +371,7 @@ func (h *handler) runEthPeer(peer *eth.Peer, handler eth.Handler) error {
 		td      = h.chain.GetTd(hash, number)
 	)
 	forkID := forkid.NewID(h.chain.Config(), h.chain.Genesis().Hash(), h.chain.CurrentHeader().Number.Uint64())
-	if err := peer.Handshake(h.networkID, td, hash, genesis.Hash(), forkID, h.forkFilter, &eth.UpgradeStatusExtension{DisablePeerTxBroadcast: false}); err != nil {
+	if err := peer.Handshake(h.networkID, td, hash, genesis.Hash(), forkID, h.forkFilter, &eth.UpgradeStatusExtension{DisablePeerTxBroadcast: h.disablePeerTxBroadcast}); err != nil {
 		peer.Log().Debug("Ethereum handshake failed", "err", err)
 		return err
 	}
@@ -407,8 +418,9 @@ func (h *handler) runEthPeer(peer *eth.Peer, handler eth.Handler) error {
 	}
 	h.chainSync.handlePeerEvent(peer)
 
-	// Propagate existing votes. new votes appearing
+	// Propagate existing transactions and votes. new transactions and votes appearing
 	// after this will be sent via broadcasts.
+	h.syncTransactions(peer)
 	if h.votepool != nil && p.bscExt != nil {
 		h.syncVotes(p.bscExt)
 	}
@@ -619,6 +631,12 @@ func (h *handler) unregisterPeer(id string) {
 func (h *handler) Start(maxPeers int) {
 	h.maxPeers = maxPeers
 
+	// broadcast transactions
+	h.wg.Add(1)
+	h.txsCh = make(chan core.NewTxsEvent, txChanSize)
+	h.txsSub = h.txpool.SubscribeNewTxsEvent(h.txsCh)
+	go h.txBroadcastLoop()
+
 	// broadcast votes
 	if h.votepool != nil {
 		h.wg.Add(1)
@@ -631,6 +649,12 @@ func (h *handler) Start(maxPeers int) {
 			go h.startMaliciousVoteMonitor()
 		}
 	}
+
+	// announce local pending transactions again
+	h.wg.Add(1)
+	h.reannoTxsCh = make(chan core.ReannoTxsEvent, txChanSize)
+	h.reannoTxsSub = h.txpool.SubscribeReannoTxsEvent(h.reannoTxsCh)
+	go h.txReannounceLoop()
 
 	// broadcast mined blocks
 	h.wg.Add(1)
@@ -659,6 +683,8 @@ func (h *handler) startMaliciousVoteMonitor() {
 }
 
 func (h *handler) Stop() {
+	h.txsSub.Unsubscribe()        // quits txBroadcastLoop
+	h.reannoTxsSub.Unsubscribe()  // quits txReannounceLoop
 	h.minedBlockSub.Unsubscribe() // quits blockBroadcastLoop
 	if h.votepool != nil {
 		h.votesSub.Unsubscribe() // quits voteBroadcastLoop
@@ -843,6 +869,32 @@ func (h *handler) minedBroadcastLoop() {
 				peer.AsyncSendNewBlock(ev.Block, td)
 			}
 			log.Info(" 🌈 mined block broadcast", "block", ev.Block.NumberU64(), "toPeers", len(peers))
+		}
+	}
+}
+
+// txBroadcastLoop announces new transactions to connected peers.
+func (h *handler) txBroadcastLoop() {
+	defer h.wg.Done()
+	for {
+		select {
+		case event := <-h.txsCh:
+			h.BroadcastTransactions(event.Txs)
+		case <-h.txsSub.Err():
+			return
+		}
+	}
+}
+
+// txReannounceLoop announces local pending transactions to connected peers again.
+func (h *handler) txReannounceLoop() {
+	defer h.wg.Done()
+	for {
+		select {
+		case event := <-h.reannoTxsCh:
+			h.ReannounceTransactions(event.Txs)
+		case <-h.reannoTxsSub.Err():
+			return
 		}
 	}
 }
