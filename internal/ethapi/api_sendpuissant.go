@@ -38,6 +38,10 @@ type SendPuissantArgs struct {
 
 // SendPuissant should only be called from PUISSANT-API
 func (s *PuissantAPI) SendPuissant(ctx context.Context, args SendPuissantArgs) error {
+	// Check if the transaction is valid.
+	// count of txs must be greater than 0
+	// if count = 1, revertible can be empty or 1 (for private transaction)
+	// if count > 1, revertible should not greater or equal than count (for puissant-package)
 	if txCount := len(args.Txs); txCount == 0 {
 		return errors.New("invalid")
 	} else if txCount > 1 && len(args.Revertible) >= txCount {
@@ -45,10 +49,10 @@ func (s *PuissantAPI) SendPuissant(ctx context.Context, args SendPuissantArgs) e
 	}
 
 	var (
-		txs           types.Transactions
-		tmpGasPrice   *big.Int
-		txHash        = mapset.NewThreadUnsafeSet[common.Hash]()
-		revertibleSet = mapset.NewThreadUnsafeSet[common.Hash]()
+		txs           types.Transactions                         // final puissant-package transactions
+		tmpGasPrice   *big.Int                                   // tmp gas price for txs-sort-check, txs must be sorted by gas price descending
+		txHash        = mapset.NewThreadUnsafeSet[common.Hash]() // tx hash set for duplicate check
+		revertibleSet = mapset.NewThreadUnsafeSet[common.Hash]() // revertible tx hash set for marking revertible
 	)
 	for _, each := range args.Revertible {
 		revertibleSet.Add(each)
@@ -59,17 +63,20 @@ func (s *PuissantAPI) SendPuissant(ctx context.Context, args SendPuissantArgs) e
 		if err := tx.UnmarshalBinary(encodedTx); err != nil {
 			return err
 		}
+		// Ensure only eip155 signed transactions are submitted if EIP155Required is set.
 		if !s.b.UnprotectedAllowed() && !tx.Protected() {
-			// Ensure only eip155 signed transactions are submitted if EIP155Required is set.
 			return errors.New("only replay-protected (EIP-155) transactions allowed over RPC")
 		}
 
+		// txs-sort-check
 		if txGP := tx.GasPrice(); tmpGasPrice == nil || tmpGasPrice.Cmp(txGP) >= 0 {
 			tmpGasPrice = txGP
 		} else {
 			return errors.New("invalid, require txs descending sort by gas price")
 		}
 		txHash.Add(tx.Hash())
+
+		// mark tx seq and revertible for puissant-package
 		tx.SetPuissantTxSeq(index)
 		if revertibleSet.Contains(tx.Hash()) {
 			tx.SetPuissantAcceptReverting()
