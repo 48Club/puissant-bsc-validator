@@ -98,10 +98,6 @@ func (tx *Transaction) Time() time.Time {
 	return tx.time
 }
 
-func (tx *Transaction) SetTime(t time.Time) {
-	tx.time = t
-}
-
 func (tx *Transaction) PuissantInfo() (PuissantID, int, int) {
 	return tx.puissantID, tx.puissantSeq, tx.puissantTxSeq
 }

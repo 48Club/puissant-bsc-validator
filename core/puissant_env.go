@@ -53,14 +53,7 @@ func (env *MinerEnvironment) Copy() *MinerEnvironment {
 	return cpy
 }
 
-// Discard terminates the background prefetcher go-routine. It should
-// always be called for all created environment instances otherwise
-// the go-routine leak can happen.
-func (env *MinerEnvironment) Discard() {
-	if env.State != nil {
-		//env.State.StopPrefetcher()
-	}
-}
+func (env *MinerEnvironment) Discard() {}
 
 func (env *MinerEnvironment) PackTx(tx *types.Transaction, receipt *types.Receipt) {
 	env.PackedTxs = append(env.PackedTxs, tx)

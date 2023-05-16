@@ -24,7 +24,6 @@ var (
 )
 
 func TestGenPuissantID(t *testing.T) {
-
 	if types.GenPuissantID([]*types.Transaction{tx1, tx2}).Hex() != "0x07302bbf3e4e309d96f3d71a07830400" {
 		t.Fatal("pid generate error")
 	}

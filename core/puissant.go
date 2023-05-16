@@ -329,7 +329,6 @@ func (pc *snapshotSet) save(pid types.PuissantID, currEnv *MinerEnvironment) boo
 		storeEnv:   currEnv.Copy(),
 		snapshotID: pc.snapshotID,
 	}
-	//log.Info(" 🐶 📷 take snapshot", "snapshotID", pc.snapshotID, "packed-count", currEnv.TxCount)
 	pc.snapshotID++
 	return true
 }
@@ -338,15 +337,13 @@ func (pc *snapshotSet) revert(bID types.PuissantID, currEnv *MinerEnvironment) {
 	load := pc.snapshots[bID]
 
 	if currEnv.TxCount != load.storeEnv.TxCount {
-		// should reload work env
-		//load.storeEnv.State.TransferPrefetcher(currEnv.State)
+		// reload work env
 		*currEnv = *load.storeEnv
 	}
 
 	for _bID, data := range pc.snapshots {
 		if data.snapshotID >= load.snapshotID {
 			delete(pc.snapshots, _bID)
-			//log.Warn(" 🐶 remove state-snapshot", "snapshotID", data.snapshotID)
 		}
 	}
 }
