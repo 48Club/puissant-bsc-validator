@@ -11,15 +11,6 @@ You can always [compare](https://github.com/bnb-chain/bsc/compare/master...48Clu
 Contributions are welcome.
 
 ### Mainly changes for 48Club puissant service
-- **Stop sharing transactions with connected peers**
-- **Share local mined block with all peers instead of part of peers**
-
-- **Removed flag**:
--
-   * `--txpool.reannouncetime`
-
-- **Removed Configs**:
-   * `TxPool.ReannounceTime`
 
 - **Added Configs**:
 -
