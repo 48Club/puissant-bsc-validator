@@ -12,9 +12,11 @@ package ethapi
 import (
 	"context"
 	"errors"
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
+	"math/big"
 )
 
 // PuissantAPI offers an API for accepting bundled transactions
@@ -36,9 +38,23 @@ type SendPuissantArgs struct {
 
 // SendPuissant should only be called from PUISSANT-API
 func (s *PuissantAPI) SendPuissant(ctx context.Context, args SendPuissantArgs) error {
-	var txs types.Transactions
+	if txCount := len(args.Txs); txCount == 0 {
+		return errors.New("invalid")
+	} else if txCount > 1 && len(args.Revertible) >= txCount {
+		return errors.New("invalid revert hash size")
+	}
 
-	for _, encodedTx := range args.Txs {
+	var (
+		txs           types.Transactions
+		tmpGasPrice   *big.Int
+		txHash        = mapset.NewThreadUnsafeSet[common.Hash]()
+		revertibleSet = mapset.NewThreadUnsafeSet[common.Hash]()
+	)
+	for _, each := range args.Revertible {
+		revertibleSet.Add(each)
+	}
+
+	for index, encodedTx := range args.Txs {
 		tx := new(types.Transaction)
 		if err := tx.UnmarshalBinary(encodedTx); err != nil {
 			return err
@@ -48,8 +64,26 @@ func (s *PuissantAPI) SendPuissant(ctx context.Context, args SendPuissantArgs) e
 			return errors.New("only replay-protected (EIP-155) transactions allowed over RPC")
 		}
 
+		if txGP := tx.GasPrice(); tmpGasPrice == nil || tmpGasPrice.Cmp(txGP) >= 0 {
+			tmpGasPrice = txGP
+		} else {
+			return errors.New("invalid, require txs descending sort by gas price")
+		}
+		txHash.Add(tx.Hash())
+		tx.SetPuissantTxSeq(index)
+		if revertibleSet.Contains(tx.Hash()) {
+			tx.SetPuissantAcceptReverting()
+		}
 		txs = append(txs, tx)
 	}
+	// check duplicate transaction in txs
+	if txHash.Cardinality() != len(txs) {
+		return errors.New("duplicate transaction found")
+	}
 
-	return s.b.SendPuissant(ctx, txs, args.Revertible, args.MaxTimestamp, args.RelaySignature)
+	pid := types.GenPuissantID(txs)
+	for _, tx := range txs {
+		tx.SetPuissantID(pid)
+	}
+	return s.b.SendPuissant(ctx, pid, txs, args.MaxTimestamp, args.RelaySignature)
 }

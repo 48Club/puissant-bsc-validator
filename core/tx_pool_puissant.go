@@ -18,7 +18,6 @@ import (
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
-	"math/big"
 	"sort"
 
 	mapset "github.com/deckarep/golang-set/v2"
@@ -61,22 +60,11 @@ func (pool *TxPool) PendingTxsAndPuissant(blockTimestamp uint64, withPuissant bo
 	return poolTx, poolPx[:pool.config.MaxPuissantPreBlock], level
 }
 
-func (pool *TxPool) AddPuissantPackage(txs types.Transactions, revertingTxHashes []common.Hash, maxTimestamp uint64, relaySignature string) error {
-	if txCount := txs.Len(); txCount == 0 {
-		return errors.New("invalid")
-	} else if txCount > 1 && len(revertingTxHashes) >= txCount {
-		return errors.New("invalid revert hash size")
+func (pool *TxPool) AddPuissantPackage(pid types.PuissantID, txs types.Transactions, maxTimestamp uint64, relaySignature string) error {
+	if err := pool.isFromTrustedRelay(pid, relaySignature); err != nil {
+		return err
 	}
-
-	var (
-		txHash        = mapset.NewThreadUnsafeSet[common.Hash]()
-		revertibleSet = mapset.NewThreadUnsafeSet[common.Hash]()
-		tmpGasPrice   *big.Int
-		senderID      common.Address
-	)
-	for _, each := range revertingTxHashes {
-		revertibleSet.Add(each)
-	}
+	var senderID common.Address
 
 	pool.mu.Lock()
 	defer pool.mu.Unlock()
@@ -95,35 +83,12 @@ func (pool *TxPool) AddPuissantPackage(txs types.Transactions, revertingTxHashes
 			}
 		}
 
-		txHash.Add(tx.Hash())
-
 		if err = pool.validateTxPuissant(tx, sender, index == 0); err != nil {
 			return err
-		} else if txGP := tx.GasPrice(); tmpGasPrice == nil || tmpGasPrice.Cmp(txGP) >= 0 {
-			tmpGasPrice = txGP
-		} else {
-			return errors.New("invalid, require txs descending sort by gas price")
-		}
-		tx.SetPuissantTxSeq(index)
-		if revertibleSet.Contains(tx.Hash()) {
-			tx.SetPuissantAcceptReverting()
 		}
 	}
-	// check duplicate transaction in txs
-	if txHash.Cardinality() != len(txs) {
-		return errors.New("invalid txs")
-	}
 
-	// pid should generate after tx revertible is set
-	puissantID := types.GenPuissantID(txs)
-	if err := pool.isFromTrustedRelay(puissantID, relaySignature); err != nil {
-		return err
-	}
-	for _, tx := range txs {
-		tx.SetPuissantID(puissantID)
-	}
-
-	newPuissant := types.NewPuissantPackage(puissantID, txs, maxTimestamp)
+	newPuissant := types.NewPuissantPackage(pid, txs, maxTimestamp)
 	if v, has := pool.puissantPool[senderID]; has && v.HigherBidGasPrice(newPuissant) {
 		return errors.New("rejected, only one pending-puissant per sender is allowed")
 	} else {
@@ -211,7 +176,10 @@ func (pool *TxPool) validateTxPuissant(tx *types.Transaction, from common.Addres
 		return ErrUnderpriced
 	}
 	// Ensure the transaction adheres to nonce ordering
-	if pool.currentState.GetNonce(from) > tx.Nonce() {
+	validNonce := pool.currentState.GetNonce(from)
+	if fundCheck && validNonce != tx.Nonce() {
+		return fmt.Errorf("invalid payment tx nonce, have %d, want %d", tx.Nonce(), validNonce)
+	} else if validNonce > tx.Nonce() {
 		return ErrNonceTooLow
 	}
 	if fundCheck && pool.currentState.GetBalance(from).Cmp(tx.Cost()) < 0 {

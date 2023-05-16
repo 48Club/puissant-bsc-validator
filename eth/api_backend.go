@@ -275,8 +275,8 @@ func (b *EthAPIBackend) SendTx(ctx context.Context, signedTx *types.Transaction)
 
 // SendPuissant send a puissant package to the transaction pool.
 // 48Club modified
-func (b *EthAPIBackend) SendPuissant(ctx context.Context, txs types.Transactions, revertible []common.Hash, maxTimestamp uint64, relaySignature string) error {
-	return b.eth.txPool.AddPuissantPackage(txs, revertible, maxTimestamp, relaySignature)
+func (b *EthAPIBackend) SendPuissant(ctx context.Context, pid types.PuissantID, txs types.Transactions, maxTimestamp uint64, relaySignature string) error {
+	return b.eth.txPool.AddPuissantPackage(pid, txs, maxTimestamp, relaySignature)
 }
 
 func (b *EthAPIBackend) GetPoolTransactions() (types.Transactions, error) {
