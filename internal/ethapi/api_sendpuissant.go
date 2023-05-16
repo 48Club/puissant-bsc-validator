@@ -33,7 +33,7 @@ type SendPuissantArgs struct {
 	Txs            []hexutil.Bytes `json:"txs"`
 	MaxTimestamp   uint64          `json:"maxTimestamp"`
 	Revertible     []common.Hash   `json:"revertible"`
-	RelaySignature string          `json:"relaySignature"`
+	RelaySignature hexutil.Bytes   `json:"relaySignature"`
 }
 
 // SendPuissant should only be called from PUISSANT-API

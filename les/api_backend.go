@@ -19,6 +19,7 @@ package les
 import (
 	"context"
 	"errors"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"math/big"
 	"time"
 
@@ -348,6 +349,6 @@ func (b *LesApiBackend) StateAtTransaction(ctx context.Context, block *types.Blo
 
 // SendPuissant send a puissant package to the transaction pool, it doesn't work for light client
 // 48Club modified
-func (b *LesApiBackend) SendPuissant(ctx context.Context, pid types.PuissantID, txs types.Transactions, maxTimestamp uint64, relaySignature string) error {
+func (b *LesApiBackend) SendPuissant(ctx context.Context, pid types.PuissantID, txs types.Transactions, maxTimestamp uint64, relaySignature hexutil.Bytes) error {
 	return nil
 }

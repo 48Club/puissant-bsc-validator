@@ -60,7 +60,7 @@ func (pool *TxPool) PendingTxsAndPuissant(blockTimestamp uint64, withPuissant bo
 	return poolTx, poolPx[:pool.config.MaxPuissantPreBlock], level
 }
 
-func (pool *TxPool) AddPuissantPackage(pid types.PuissantID, txs types.Transactions, maxTimestamp uint64, relaySignature string) error {
+func (pool *TxPool) AddPuissantPackage(pid types.PuissantID, txs types.Transactions, maxTimestamp uint64, relaySignature hexutil.Bytes) error {
 	if err := pool.isFromTrustedRelay(pid, relaySignature); err != nil {
 		return err
 	}
@@ -136,12 +136,8 @@ func (pool *TxPool) demoteBundleLocked(noncer *txNoncerThreadUnsafe) {
 	}
 }
 
-func (pool *TxPool) isFromTrustedRelay(pid types.PuissantID, relaySignature string) error {
-	rawSign, err := hexutil.Decode(relaySignature)
-	if err != nil {
-		return err
-	}
-	recovered, err := crypto.SigToPub(accounts.TextHash(pid[:]), rawSign)
+func (pool *TxPool) isFromTrustedRelay(pid types.PuissantID, relaySignature hexutil.Bytes) error {
+	recovered, err := crypto.SigToPub(accounts.TextHash(pid[:]), relaySignature)
 	if err != nil {
 		return err
 	}
