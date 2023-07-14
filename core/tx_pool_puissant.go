@@ -89,11 +89,11 @@ func (pool *TxPool) AddPuissantPackage(pid types.PuissantID, txs types.Transacti
 	}
 
 	newPuissant := types.NewPuissantPackage(pid, txs, maxTimestamp)
-	if v, has := pool.puissantPool[senderID]; has && v.HigherBidGasPrice(newPuissant) {
-		return errors.New("rejected, only one pending-puissant per sender is allowed")
-	} else {
+	v, has := pool.puissantPool[senderID]
+	if !has || v.ReplacedByNewPuissant(newPuissant, 10) {
 		pool.puissantPool[senderID] = newPuissant
 	}
+
 	return nil
 }
 

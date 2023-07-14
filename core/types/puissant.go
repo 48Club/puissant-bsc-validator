@@ -46,6 +46,13 @@ func (pp *PuissantPackage) HigherBidGasPrice(with *PuissantPackage) bool {
 	return pp.bidGasPrice.Cmp(with.bidGasPrice) > 0
 }
 
+func (pp *PuissantPackage) ReplacedByNewPuissant(np *PuissantPackage, priceBump uint64) bool {
+	oldP := new(big.Int).Mul(pp.bidGasPrice, big.NewInt(100+int64(priceBump)))
+	newP := new(big.Int).Mul(np.bidGasPrice, big.NewInt(100))
+
+	return newP.Cmp(oldP) > 0
+}
+
 func (pp *PuissantPackage) HigherBidGasPriceIntCmp(with *big.Int) bool {
 	return pp.bidGasPrice.Cmp(with) > 0
 }
