@@ -369,6 +369,7 @@ func (w *worker) newWorkLoop(recommit time.Duration) {
 			}
 			clearPending(head.Block.NumberU64())
 			timestamp = time.Now().Unix()
+
 			signedRecent, err := w.engine.SignRecently(w.chain, head.Block)
 			if err != nil {
 				log.Info("Not allowed to propose block", "err", err)

@@ -81,6 +81,10 @@ type Config struct {
 	// connected. It must be greater than zero.
 	MaxPeers int
 
+	// MaxPeersPerIP is the maximum number of peers that can be
+	// connected from a single IP. It must be greater than zero.
+	MaxPeersPerIP int `toml:",omitempty"`
+
 	// MaxPendingPeers is the maximum number of peers that can be pending in the
 	// handshake phase, counted separately for inbound and outbound connections.
 	// Zero defaults to preset values.
@@ -607,7 +611,7 @@ func (srv *Server) setupDiscovery() error {
 			Tail   []rlp.RawValue `rlp:"tail"`
 		}
 		if r.Load(enr.WithEntry("eth", &eth)) != nil {
-			return false
+			return true
 		}
 		return srv.forkFilter(eth.ForkID) == nil
 	}

@@ -702,6 +702,13 @@ var (
 		Usage: "Maximum number of network peers (network disabled if set to 0)",
 		Value: node.DefaultConfig.P2P.MaxPeers,
 	}
+
+	MaxPeersPerIPFlag = cli.IntFlag{
+		Name:  "maxpeersperip",
+		Usage: "Maximum number of network peers from a single IP address, (default used if set to <= 0, which is same as MaxPeers)",
+		Value: node.DefaultConfig.P2P.MaxPeersPerIP,
+	}
+
 	MaxPendingPeersFlag = cli.IntFlag{
 		Name:  "maxpendpeers",
 		Usage: "Maximum number of pending connection attempts (defaults used if set to 0)",
@@ -898,7 +905,7 @@ var (
 
 	VotingEnabledFlag = cli.BoolFlag{
 		Name:  "vote",
-		Usage: "Enable voting",
+		Usage: "Enable voting when mining",
 	}
 
 	EnableMaliciousVoteMonitorFlag = cli.BoolFlag{
@@ -1282,6 +1289,15 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config) {
 			cfg.MaxPeers = lightPeers
 		}
 	}
+	// if max peers per ip is not set, use max peers
+	if cfg.MaxPeersPerIP <= 0 {
+		cfg.MaxPeersPerIP = cfg.MaxPeers
+	}
+	// flag like: `--maxpeersperip 10` could override the setting in config.toml
+	if ctx.GlobalIsSet(MaxPeersPerIPFlag.Name) {
+		cfg.MaxPeersPerIP = ctx.GlobalInt(MaxPeersPerIPFlag.Name)
+	}
+
 	if !(lightClient || lightServer) {
 		lightPeers = 0
 	}
@@ -1953,6 +1969,21 @@ func EnableMinerInfo(ctx *cli.Context, minerConfig miner.Config) SetupMetricsOpt
 			minerInfo[UnlockedAccountFlag.Name] = ctx.GlobalString(UnlockedAccountFlag.Name)
 			metrics.NewRegisteredLabel("miner-info", nil).Mark(minerInfo)
 		}
+	}
+}
+
+func EnableNodeInfo(poolConfig core.TxPoolConfig) SetupMetricsOption {
+	return func() {
+		// register node info into metrics
+		metrics.NewRegisteredLabel("node-info", nil).Mark(map[string]interface{}{
+			"PriceLimit":   poolConfig.PriceLimit,
+			"PriceBump":    poolConfig.PriceBump,
+			"AccountSlots": poolConfig.AccountSlots,
+			"GlobalSlots":  poolConfig.GlobalSlots,
+			"AccountQueue": poolConfig.AccountQueue,
+			"GlobalQueue":  poolConfig.GlobalQueue,
+			"Lifetime":     poolConfig.Lifetime,
+		})
 	}
 }
 
