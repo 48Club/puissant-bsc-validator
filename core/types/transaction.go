@@ -19,6 +19,7 @@ package types
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"math/big"
 	"sync/atomic"
@@ -468,6 +469,13 @@ func (tx *Transaction) Hash() common.Hash {
 	}
 	tx.hash.Store(h)
 	return h
+}
+
+// Errorf returns a new error with the given formatted string.
+func (tx *Transaction) Errorf(e string) error {
+	txString := tx.Hash().Hex()
+	hash := txString[:5] + "..." + txString[len(txString)-3:]
+	return fmt.Errorf("%s: %s", hash, e)
 }
 
 // Size returns the true encoded storage size of the transaction, either by encoding
