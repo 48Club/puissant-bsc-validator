@@ -221,7 +221,7 @@ func (pool *TxPool) validateTxPuissant(tx *types.Transaction, from common.Addres
 	if fundCheck && validNonce != tx.Nonce() {
 		return fmt.Errorf("invalid payment tx nonce, have %d, want %d", tx.Nonce(), validNonce)
 	} else if validNonce > tx.Nonce() {
-		return ErrNonceTooLow
+		return tx.Errorf("nonce too low")
 	}
 	if fundCheck && pool.currentState.GetBalance(from).Cmp(tx.Cost()) < 0 {
 		return ErrInsufficientFunds

@@ -715,7 +715,7 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 	}
 	// Ensure the transaction adheres to nonce ordering
 	if pool.currentState.GetNonce(from) > tx.Nonce() {
-		return ErrNonceTooLow
+		return tx.Errorf("nonce too low")
 	}
 	// Transactor should have enough funds to cover the costs
 	// cost == V + GP * GL
