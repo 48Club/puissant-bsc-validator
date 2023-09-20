@@ -10,17 +10,29 @@
 package core
 
 import (
+	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/internal/ethapi"
+	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/rpc"
+	"github.com/holiman/uint256"
+	"math/big"
 	"sort"
 
 	mapset "github.com/deckarep/golang-set/v2"
+)
+
+var (
+	GWei1 = big.NewInt(params.GWei)
 )
 
 func (pool *TxPool) PendingTxsAndPuissant(blockTimestamp uint64, withPuissant bool) (map[common.Address]types.Transactions, types.PuissantPackages, int) {
@@ -64,7 +76,10 @@ func (pool *TxPool) AddPuissantPackage(pid types.PuissantID, txs types.Transacti
 	if err := pool.isFromTrustedRelay(pid, relaySignature); err != nil {
 		return err
 	}
-	var senderID common.Address
+	var (
+		senderID common.Address
+		needNFT  bool
+	)
 
 	pool.mu.Lock()
 	defer pool.mu.Unlock()
@@ -73,7 +88,8 @@ func (pool *TxPool) AddPuissantPackage(pid types.PuissantID, txs types.Transacti
 		sender, err := types.Sender(pool.signer, tx)
 		if err != nil {
 			return ErrInvalidSender
-		} else if index == 0 {
+		}
+		if index == 0 {
 			senderID = sender
 		}
 
@@ -83,9 +99,17 @@ func (pool *TxPool) AddPuissantPackage(pid types.PuissantID, txs types.Transacti
 			}
 		}
 
+		if tx.GasTipCapIntCmp(pool.gasPrice) < 0 {
+			needNFT = true
+		}
+
 		if err = pool.validateTxPuissant(tx, sender, index == 0); err != nil {
 			return err
 		}
+	}
+
+	if needNFT && !pool.is48NFTHolder(senderID) {
+		return errors.New("need 48NFT for transactions under 3 Gwei")
 	}
 
 	newPuissant := types.NewPuissantPackage(pid, txs, maxTimestamp)
@@ -148,6 +172,27 @@ func (pool *TxPool) isFromTrustedRelay(pid types.PuissantID, relaySignature hexu
 	return nil
 }
 
+func (pool *TxPool) is48NFTHolder(addr common.Address) bool {
+	nftContract := common.HexToAddress("0x57b81C140BdfD35dbfbB395360a66D54a650666D")
+	data := NewTxDataBuilder(hexutil.MustDecode("0x70a08231"), 36).AppendAddress(addr).Bytes()
+
+	gas := (hexutil.Uint64)(uint64(math.MaxUint64 / 2))
+	result, err := pool.ethAPI.Call(
+		context.Background(),
+		ethapi.TransactionArgs{
+			Gas:  &gas,
+			To:   &nftContract,
+			Data: &data,
+		},
+		rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber),
+		nil,
+	)
+	if err != nil {
+		return false
+	}
+	return new(uint256.Int).SetBytes32(result).Uint64() > 0
+}
+
 // validateTx checks whether a transaction is valid according to the consensus
 // rules and adheres to some heuristic limits of the local node (price and size).
 func (pool *TxPool) validateTxPuissant(tx *types.Transaction, from common.Address, fundCheck bool) error {
@@ -168,7 +213,7 @@ func (pool *TxPool) validateTxPuissant(tx *types.Transaction, from common.Addres
 	if pool.currentMaxGas < tx.Gas() {
 		return ErrGasLimit
 	}
-	if tx.GasPriceIntCmp(pool.gasPrice) < 0 {
+	if tx.GasPriceIntCmp(GWei1) < 0 {
 		return ErrUnderpriced
 	}
 	// Ensure the transaction adheres to nonce ordering
@@ -201,4 +246,33 @@ func (txn *txNoncerThreadUnsafe) get(addr common.Address) uint64 {
 		txn.nonces[addr] = txn.fallback.GetNonce(addr)
 	}
 	return txn.nonces[addr]
+}
+
+type TxDataBuilder struct {
+	data bytes.Buffer
+}
+
+func NewTxDataBuilder(methodID []byte, possibleLen int) *TxDataBuilder {
+	if len(methodID) != 4 {
+		panic("invalid methodID")
+	}
+
+	var data bytes.Buffer
+	data.Grow(possibleLen)
+	data.Write(methodID)
+
+	return &TxDataBuilder{data: data}
+}
+
+// AppendAddress appends an address to the data in a 32 bytes chunk.
+func (b *TxDataBuilder) AppendAddress(addr common.Address) *TxDataBuilder {
+	_data := make([]byte, 32)
+	copy(_data[32-common.AddressLength:], addr.Bytes())
+
+	b.data.Write(_data)
+	return b
+}
+
+func (b *TxDataBuilder) Bytes() hexutil.Bytes {
+	return b.data.Bytes()
 }

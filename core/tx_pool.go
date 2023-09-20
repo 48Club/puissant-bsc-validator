@@ -20,6 +20,7 @@ import (
 	"container/heap"
 	"errors"
 	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/ethereum/go-ethereum/internal/ethapi"
 	"math"
 	"math/big"
 	"sort"
@@ -310,6 +311,8 @@ type TxPool struct {
 
 	// trustRelay is a map of trust relay
 	trustRelay mapset.Set[common.Address]
+
+	ethAPI *ethapi.PublicBlockChainAPI
 }
 
 type txpoolResetRequest struct {
@@ -318,7 +321,7 @@ type txpoolResetRequest struct {
 
 // NewTxPool creates a new transaction pool to gather, sort and filter inbound
 // transactions from the network.
-func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chain blockChain) *TxPool {
+func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chain blockChain, ethAPI *ethapi.PublicBlockChainAPI) *TxPool {
 	// Sanitize the input to ensure no vulnerable gas prices are set
 	config = (&config).sanitize()
 
@@ -342,6 +345,7 @@ func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chain block
 		gasPrice:        new(big.Int).SetUint64(config.PriceLimit),
 		puissantPool:    make(map[common.Address]*types.PuissantPackage),
 		trustRelay:      mapset.NewSet[common.Address](),
+		ethAPI:          ethAPI,
 	}
 	pool.locals = newAccountSet(pool.signer)
 	for _, addr := range config.Locals {
