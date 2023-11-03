@@ -121,7 +121,7 @@ func (pr *puissantReporter) Update(newGroup CommitterReportList, round int) {
 	}
 }
 
-func (pr *puissantReporter) Done(bestRound int, blockNumber uint64, blockIncome *big.Int, senderFn func(text string, mute bool), msgSigner func(text []byte) []byte) (ret []common.Hash) {
+func (pr *puissantReporter) Done(bestRound int, blockNumber uint64, blockIncome *big.Int, senderFn func(text string, mute bool), msgSigner func(text []byte) []byte, puissantReportURL string) (ret []common.Hash) {
 	if pr.loaded.Cardinality() == 0 {
 		return nil
 	}
@@ -167,12 +167,12 @@ func (pr *puissantReporter) Done(bestRound int, blockNumber uint64, blockIncome 
 
 	senderFn(text, true)
 	if msgSigner != nil {
-		pr.send(bestRound, blockNumber, msgSigner)
+		pr.send(bestRound, blockNumber, msgSigner, puissantReportURL)
 	}
 	return ret
 }
 
-func (pr *puissantReporter) send(bestRound int, blockNumber uint64, msgSigner func(text []byte) []byte) {
+func (pr *puissantReporter) send(bestRound int, blockNumber uint64, msgSigner func(text []byte) []byte, puissantReportURL string) {
 	if len(pr.data) == 0 {
 		return
 	}
@@ -206,7 +206,7 @@ func (pr *puissantReporter) send(bestRound int, blockNumber uint64, msgSigner fu
 	req, resp := fasthttp.AcquireRequest(), fasthttp.AcquireResponse()
 	defer fasthttp.ReleaseRequest(req)
 	defer fasthttp.ReleaseResponse(resp)
-	if err := doRequest(types.PuissantStatusReportURL, body, req, resp, msgSigner); err != nil {
+	if err := doRequest(puissantReportURL, body, req, resp, msgSigner); err != nil {
 		log.Error("❌ report packing result failed", "err", err)
 	}
 }
@@ -230,6 +230,13 @@ type tUploadTransaction struct {
 	RevertMsg string               `json:"revert_msg"`
 }
 
+type jsonrpcMessage struct {
+	Version string          `json:"jsonrpc,omitempty"`
+	ID      json.RawMessage `json:"id,omitempty"`
+	Method  string          `json:"method,omitempty"`
+	Params  json.RawMessage `json:"params,omitempty"`
+}
+
 func doRequest(url string, data interface{}, req *fasthttp.Request, resp *fasthttp.Response, msgSigner func([]byte) []byte) error {
 	req.SetRequestURI(url)
 	req.Header.Set("Content-Type", "application/json")
@@ -239,7 +246,13 @@ func doRequest(url string, data interface{}, req *fasthttp.Request, resp *fastht
 	req.Header.Set("timestamp", timestamp)
 	req.Header.Set("sign", hexutil.Encode(msgSigner([]byte(timestamp))))
 
-	b, _ := json.Marshal(data)
+	rawData, _ := json.Marshal(data)
+
+	jsonrpcMsg := &jsonrpcMessage{Version: "2.0", ID: json.RawMessage("1"), Method: "eth_reportPuissant"}
+	jsonrpcMsg.Params = rawData
+
+	b, _ := json.Marshal(jsonrpcMsg)
+
 	req.SetBodyRaw(b)
 
 	return fasthttp.DoTimeout(req, resp, 2*time.Second)
