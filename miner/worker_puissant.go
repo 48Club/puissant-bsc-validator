@@ -252,7 +252,7 @@ LOOP:
 	bestWork := pickTheMostProfitableWork(workList)
 	w.commit(bestWork.work, w.fullTaskHook, true, start)
 
-	go pReporter.Done(bestWork.round, initHeader.Number.Uint64(), bestWork.income, w.sendMessage, w.engine.SignText)
+	go pReporter.Done(bestWork.round, initHeader.Number.Uint64(), bestWork.income, w.sendMessage, w.engine.SignText, w.puissantReportURL)
 }
 
 func pickTheMostProfitableWork(workList []*multiPackingWork) *multiPackingWork {

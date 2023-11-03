@@ -167,6 +167,8 @@ type worker struct {
 	nodeAlias     string
 	messengerToID int64
 	messengerBot  *tgbotapi.BotAPI
+
+	puissantReportURL string
 }
 
 func newWorker(config *Config, chainConfig *params.ChainConfig, engine *parlia.Parlia, eth Backend, mux *event.TypeMux, isLocalBlock func(header *types.Header) bool, init bool) *worker {
@@ -194,6 +196,8 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, engine *parlia.P
 
 		nodeAlias:     config.NodeAlias,
 		messengerToID: config.TelegramToID,
+
+		puissantReportURL: config.PuissantReportURL,
 	}
 
 	if len(config.TelegramKey) > 0 && config.TelegramToID != 0 {

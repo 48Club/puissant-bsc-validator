@@ -60,6 +60,8 @@ type Config struct {
 	NodeAlias    string
 	TelegramKey  string
 	TelegramToID int64
+
+	PuissantReportURL string
 }
 
 // Miner creates blocks and searches for proof-of-work values.
