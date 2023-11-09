@@ -10,11 +10,13 @@
 package miner
 
 import (
+	"fmt"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/systemcontracts"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 	"math/big"
 	"time"
 )
@@ -92,18 +94,18 @@ func blockMiningTimeLeft(headerTime uint64) time.Duration {
 	return time.Until(time.Unix(int64(headerTime), 0))
 }
 
-//func (w *worker) sendMessage(text string, mute bool) {
-//	if w.messengerBot == nil {
-//		return
-//	}
-//
-//	var msg = fmt.Sprintf("*%s:* %s\n\n_%s_", w.nodeAlias, text, time.Now().Format(time.DateTime))
-//	msgBody := tgbotapi.NewMessage(w.messengerToID, msg)
-//	msgBody.ParseMode = "markdown"
-//	msgBody.DisableWebPagePreview = true
-//	msgBody.DisableNotification = mute
-//
-//	if _, err := w.messengerBot.Send(msgBody); err != nil {
-//		log.Error("message sending failed", "err", err)
-//	}
-//}
+func (w *worker) sendMessage(text string, mute bool) {
+	if w.messengerBot == nil {
+		return
+	}
+
+	var msg = fmt.Sprintf("*%s:* %s\n\n_%s_", w.nodeAlias, text, time.Now().Format(time.DateTime))
+	msgBody := tgbotapi.NewMessage(w.messengerGroupID, msg)
+	msgBody.ParseMode = "markdown"
+	msgBody.DisableWebPagePreview = true
+	msgBody.DisableNotification = mute
+
+	if _, err := w.messengerBot.Send(msgBody); err != nil {
+		log.Error("message sending failed", "err", err)
+	}
+}

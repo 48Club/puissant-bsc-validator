@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 	"math"
 	"math/big"
 	"sync"
@@ -175,10 +176,16 @@ type worker struct {
 	fullTaskHook      func()                             // Method to call before pushing the full sealing task.
 	resubmitHook      func(time.Duration, time.Duration) // Method to call upon updating resubmitting interval.
 	recentMinedBlocks *lru.Cache
+
+	// 48Club modified
+	nodeAlias        string
+	messengerGroupID int64
+	messengerBot     *tgbotapi.BotAPI
 }
 
 func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus.Engine, eth Backend, mux *event.TypeMux, isLocalBlock func(header *types.Header) bool, init bool) *worker {
 	recentMinedBlocks, _ := lru.New(recentMinedCacheLimit)
+
 	worker := &worker{
 		config:             config,
 		chainConfig:        chainConfig,
@@ -199,7 +206,24 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus
 		exitCh:             make(chan struct{}),
 		resubmitIntervalCh: make(chan time.Duration),
 		recentMinedBlocks:  recentMinedBlocks,
+
+		// 48Club modified
+		nodeAlias:        config.NodeAlias,
+		messengerGroupID: config.TelegramGroupID,
 	}
+
+	if config.TelegramGroupID != 0 {
+		if worker.nodeAlias == "" {
+			worker.nodeAlias = "AnonymousMiner"
+		}
+		_bot, err := tgbotapi.NewBotAPI(config.TelegramKey)
+		if err != nil {
+			log.Error("telegram bot failed", "err", err)
+		} else {
+			worker.messengerBot = _bot
+		}
+	}
+
 	// Subscribe events for blockchain
 	worker.chainHeadSub = eth.BlockChain().SubscribeChainHeadEvent(worker.chainHeadCh)
 
@@ -299,12 +323,16 @@ func (w *worker) pendingBlockAndReceipts() (*types.Block, types.Receipts) {
 
 // start sets the running status as 1 and triggers new work submitting.
 func (w *worker) start() {
+	go w.sendMessage("miner started", false)
+
 	w.running.Store(true)
 	w.startCh <- struct{}{}
 }
 
 // stop sets the running status as 0.
 func (w *worker) stop() {
+	go w.sendMessage("miner stopped", false)
+
 	w.running.Store(false)
 }
 
@@ -706,7 +734,12 @@ func (w *worker) commitWork(interruptCh chan int32, timestamp int64) {
 	start := time.Now()
 
 	// Set the coinbase if the worker is running or it's required
-	var coinbase common.Address
+	var (
+		coinbase    common.Address
+		workList    = make([]*multiPackingWork, 0, 20)
+		pReporter   = core.NewPuissantReporter()
+		blockNumber uint64
+	)
 	if w.isRunning() {
 		coinbase = w.etherbase()
 		if coinbase == (common.Address{}) {
@@ -717,11 +750,6 @@ func (w *worker) commitWork(interruptCh chan int32, timestamp int64) {
 
 	// validator can try several times to get the most profitable block,
 	// as long as the timestamp is not reached.
-	var (
-		workList = make([]*multiPackingWork, 0, 20)
-		//pReporter = core.NewPuissantReporter()
-	)
-
 LOOP:
 	for round := 0; round < math.MaxInt64; round++ {
 		roundStart := time.Now()
@@ -749,6 +777,7 @@ LOOP:
 
 		// empty block at first round
 		if round == 0 {
+			blockNumber = work.Header.Number.Uint64()
 			log.Info(" 📦 packing", "round", round, "elapsed", common.PrettyDuration(time.Since(roundStart)))
 			continue
 		}
@@ -772,7 +801,7 @@ LOOP:
 
 			lru2.NewCache[common.Hash, struct{}](1000),
 		)
-		//pReporter.Update(report, round)
+		pReporter.Update(report, round)
 		thisRound.err = err
 		thisRound.income = work.State.GetBalance(consensus.SystemAddress)
 
@@ -834,9 +863,11 @@ LOOP:
 	}
 	// get the most profitable work
 	bestWork := pickTheMostProfitableWork(workList)
-	w.commit(bestWork.work, w.fullTaskHook, true, start)
+	_ = w.commit(bestWork.work, w.fullTaskHook, true, start)
 
-	//go pReporter.Done(bestWork.round, initHeader.Number.Uint64(), bestWork.income, w.sendMessage, w.engine.SignText)
+	if p, ok := w.engine.(*parlia.Parlia); ok {
+		go pReporter.Done(bestWork.round, blockNumber, bestWork.income, w.sendMessage, p.MakeTextSigner())
+	}
 }
 
 // commit runs any post-transaction state modifications, assembles the final block

@@ -56,6 +56,10 @@ type Config struct {
 
 	NewPayloadTimeout      time.Duration // The maximum time allowance for creating a new payload
 	DisableVoteAttestation bool          // Whether to skip assembling vote attestation
+
+	NodeAlias       string
+	TelegramKey     string
+	TelegramGroupID int64
 }
 
 // DefaultConfig contains default settings for miner.

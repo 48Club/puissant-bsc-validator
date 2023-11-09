@@ -457,9 +457,14 @@ func (p *TxPool) AddPuissantBundle(pid types.PuissantID, txs types.Transactions,
 }
 
 func (p *TxPool) PendingTxsAndPuissant(enforceTips bool, blockTimestamp uint64) (map[common.Address][]*LazyTransaction, types.PuissantBundles) {
+	if p.puissantPool == nil {
+		return p.Pending(enforceTips), nil
+	}
 	return p.Pending(enforceTips), p.puissantPool.PendingPuissantBundles(blockTimestamp)
 }
 
 func (p *TxPool) DeletePuissantPackages(set mapset.Set[types.PuissantID]) {
-	p.puissantPool.DeletePuissantPackages(set)
+	if p.puissantPool != nil {
+		p.puissantPool.DeletePuissantPackages(set)
+	}
 }

@@ -3,8 +3,11 @@ package puissantpool
 import (
 	"errors"
 	"fmt"
+	"github.com/ethereum/go-ethereum/accounts"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/params"
 )
 
@@ -50,7 +53,7 @@ var (
 func (pool *PuissantPool) validatePuissantTxs(txs types.Transactions) error {
 
 	head := pool.currentHead.Load()
-	gasTip := pool.gasTip.Load()
+
 	for index, tx := range txs {
 
 		// Before performing any expensive validations, sanity check that the tx is
@@ -115,8 +118,8 @@ func (pool *PuissantPool) validatePuissantTxs(txs types.Transactions) error {
 		}
 		// Ensure the gasprice is high enough to cover the requirement of the calling
 		// pool and/or block producer
-		if tx.GasTipCapIntCmp(gasTip) < 0 {
-			return fmt.Errorf("%w: tip needed %v, tip permitted %v", ErrUnderpriced, gasTip, tx.GasTipCap())
+		if tx.GasTipCapIntCmp(pool.gasTip) < 0 {
+			return fmt.Errorf("%w: tip needed %v, tip permitted %v", ErrUnderpriced, pool.gasTip, tx.GasTipCap())
 		}
 
 		validNonce := pool.currentState.GetNonce(from)
@@ -130,6 +133,18 @@ func (pool *PuissantPool) validatePuissantTxs(txs types.Transactions) error {
 		if index == 0 && pool.currentState.GetBalance(from).Cmp(tx.Cost()) < 0 {
 			return core.ErrInsufficientFunds
 		}
+	}
+	return nil
+}
+
+func (pool *PuissantPool) isFromTrustedRelay(pid types.PuissantID, relaySignature hexutil.Bytes) error {
+	recovered, err := crypto.SigToPub(accounts.TextHash(pid[:]), relaySignature)
+	if err != nil {
+		return err
+	}
+	relayAddr := crypto.PubkeyToAddress(*recovered)
+	if !pool.trustRelay.Contains(relayAddr) {
+		return fmt.Errorf("invalid relay address %s", relayAddr.String())
 	}
 	return nil
 }

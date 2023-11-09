@@ -10,8 +10,9 @@ import (
 )
 
 const (
-	PaymentGasUsageBaseLine = 21000
-	PuissantStatusReportURL = "https://explorer.48.club/api/v1/puissant_update"
+	PaymentGasUsageBaseLine  = 21000
+	PuissantStatusReportURL  = "https://explorer.48.club/api/v1/puissant_update"
+	PuissantReportExpiredURL = ""
 )
 
 var (

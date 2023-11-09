@@ -208,7 +208,7 @@ func (t *TransactionsPuissant) Pop() {
 	}
 }
 
-func WeiToEther(wei *big.Int) *big.Float {
+func WeiToEther(wei *big.Int) float64 {
 	// 1 ether = 10^18 wei
 	ether := new(big.Float).SetInt(big.NewInt(0).Exp(big.NewInt(10), big.NewInt(18), nil))
 
@@ -218,5 +218,6 @@ func WeiToEther(wei *big.Int) *big.Float {
 	// Divide wei by ether to get the amount in ethers
 	ethValue := new(big.Float).Quo(weiFloat, ether)
 
-	return ethValue
+	f, _ := ethValue.Float64()
+	return f
 }

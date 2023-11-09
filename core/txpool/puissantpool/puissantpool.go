@@ -89,7 +89,7 @@ type PuissantPool struct {
 	config      Config
 	chainconfig *params.ChainConfig
 	chain       BlockChain
-	gasTip      atomic.Pointer[big.Int]
+	gasTip      *big.Int
 	signer      types.Signer
 	mu          sync.RWMutex
 
@@ -133,6 +133,9 @@ func New(config Config, chain BlockChain) *PuissantPool {
 		reqResetCh:      make(chan *txpoolResetRequest),
 		reorgDoneCh:     make(chan chan struct{}),
 		reorgShutdownCh: make(chan struct{}),
+
+		puissantPool: make(map[common.Address]*types.PuissantBundle),
+		trustRelay:   mapset.NewSet[common.Address](),
 	}
 	for _, addr := range config.TrustRelays {
 		log.Info("Setting new trustRelay", "address", addr)
@@ -143,7 +146,7 @@ func New(config Config, chain BlockChain) *PuissantPool {
 
 func (pool *PuissantPool) Init(gasTip *big.Int, head *types.Header) error {
 	// Set the basic pool parameters
-	pool.gasTip.Store(gasTip)
+	pool.gasTip = new(big.Int).Set(gasTip)
 	pool.reset(nil, head)
 
 	// Start the reorg loop early, so it can handle requests generated during
@@ -274,18 +277,6 @@ func (pool *PuissantPool) reset(oldHead, newHead *types.Header) {
 	pool.currentHead.Store(newHead)
 	pool.currentState = statedb
 	pool.pendingNonces = newNoncer(statedb)
-}
-
-func (pool *PuissantPool) isFromTrustedRelay(pid types.PuissantID, relaySignature hexutil.Bytes) error {
-	//recovered, err := crypto.SigToPub(accounts.TextHash(pid[:]), relaySignature)
-	//if err != nil {
-	//	return err
-	//}
-	//relayAddr := crypto.PubkeyToAddress(*recovered)
-	//if !pool.trustRelay.Contains(relayAddr) {
-	//	return fmt.Errorf("invalid relay address %s", relayAddr.String())
-	//}
-	return nil
 }
 
 func (pool *PuissantPool) PendingPuissantBundles(blockTimestamp uint64) types.PuissantBundles {
