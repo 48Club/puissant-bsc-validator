@@ -209,6 +209,9 @@ func (t *TransactionsPuissant) Pop() {
 }
 
 func WeiToEther(wei *big.Int) float64 {
+	if wei == nil {
+		return 0
+	}
 	// 1 ether = 10^18 wei
 	ether := new(big.Float).SetInt(big.NewInt(0).Exp(big.NewInt(10), big.NewInt(18), nil))
 
