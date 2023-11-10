@@ -3,6 +3,7 @@ package types
 import (
 	"bytes"
 	"errors"
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/google/uuid"
@@ -50,20 +51,23 @@ func (p PuissantID) setBytes(b []byte) {
 	copy(p[16-len(b):], b)
 }
 
-// GenPuissantID generates a PuissantID from a list of transactions.
-// Note! The transactions must set isAcceptReverting() before calling this function.
-func GenPuissantID(txs []*Transaction) PuissantID {
+func GenPuissantID(txs []*Transaction, revertible mapset.Set[common.Hash], maxTimestamp uint64) PuissantID {
 	var msg bytes.Buffer
-	msg.Grow(len(txs) * 33)
+	msg.Grow(len(txs)*common.HashLength + 4)
 
 	for _, tx := range txs {
 		msg.Write(tx.Hash().Bytes())
-		if tx.AcceptsReverting() {
+		if revertible.Contains(tx.Hash()) {
 			msg.WriteByte(math.MaxUint8)
 		} else {
 			msg.WriteByte(0)
 		}
 	}
+
+	msg.WriteByte(byte(maxTimestamp))
+	msg.WriteByte(byte(maxTimestamp >> 8))
+	msg.WriteByte(byte(maxTimestamp >> 16))
+	msg.WriteByte(byte(maxTimestamp >> 24))
 
 	return PuissantID(uuid.NewMD5(uuid.NameSpaceDNS, []byte(msg.String())))
 }

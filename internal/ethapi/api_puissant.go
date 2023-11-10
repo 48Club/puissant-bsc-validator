@@ -87,7 +87,7 @@ func (s *PuissantAPI) SendPuissant(ctx context.Context, args SendPuissantArgs) e
 		return errors.New("duplicate transaction found")
 	}
 
-	pid := types.GenPuissantID(txs)
+	pid := types.GenPuissantID(txs, revertibleSet, args.MaxTimestamp)
 	for _, tx := range txs {
 		tx.SetPuissantID(pid)
 	}
