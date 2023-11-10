@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/ethereum/go-ethereum/core/txpool"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 	"math"
 	"math/big"
@@ -782,7 +783,15 @@ LOOP:
 			continue
 		}
 
-		pendingTxs, pendingPuissant := w.eth.TxPool().PendingTxsAndPuissant(false, work.Header.Time)
+		var (
+			pendingTxs      map[common.Address][]*txpool.LazyTransaction
+			pendingPuissant types.PuissantBundles
+		)
+		if work.Header.Difficulty.Cmp(diffInTurn) == 0 {
+			pendingTxs, pendingPuissant = w.eth.TxPool().PendingTxsAndPuissant(false, work.Header.Time)
+		} else {
+			pendingTxs = w.eth.TxPool().Pending(false)
+		}
 
 		var pendings = make(map[common.Address][]*types.Transaction)
 		for from, txs := range pendingTxs {
@@ -790,6 +799,7 @@ LOOP:
 				pendings[from] = append(pendings[from], tx.Tx.Tx)
 			}
 		}
+		
 		report, err := core.RunPuissantCommitter(
 			timeLeft,
 			work,
@@ -972,3 +982,7 @@ func signalToErr(signal int32) error {
 		panic(fmt.Errorf("undefined signal %d", signal))
 	}
 }
+
+var (
+	diffInTurn = big.NewInt(2)
+)
