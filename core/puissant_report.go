@@ -1,6 +1,7 @@
 package core
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	mapset "github.com/deckarep/golang-set/v2"
@@ -9,7 +10,6 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
-	"github.com/valyala/fasthttp"
 	"math/big"
 	"net/http"
 	"strconv"
@@ -87,6 +87,8 @@ type puissantReporter struct {
 	data     map[int]CommitterReportList
 	evmTried mapset.Set[types.PuissantID]
 	loaded   mapset.Set[types.PuissantID]
+
+	client *http.Client
 }
 
 func NewPuissantReporter() *puissantReporter {
@@ -94,6 +96,8 @@ func NewPuissantReporter() *puissantReporter {
 		data:     make(map[int]CommitterReportList),
 		evmTried: mapset.NewThreadUnsafeSet[types.PuissantID](),
 		loaded:   mapset.NewThreadUnsafeSet[types.PuissantID](),
+
+		client: &http.Client{Timeout: 5 * time.Second},
 	}
 }
 
@@ -113,11 +117,13 @@ func (pr *puissantReporter) Update(newGroup CommitterReportList, round int) {
 }
 
 func (pr *puissantReporter) Done(bestRound int, blockNumber uint64, blockIncome *big.Int, senderFn func(text string, mute bool), msgSigner func(text []byte) []byte) (ret []common.Hash) {
+
 	if pr.loaded.Cardinality() == 0 {
 		return nil
 	}
 
 	var (
+		start        = time.Now()
 		success      int
 		puiIncomeF   float64
 		incomeS      string
@@ -154,12 +160,12 @@ func (pr *puissantReporter) Done(bestRound int, blockNumber uint64, blockIncome 
 
 	senderFn(text, true)
 	if msgSigner != nil {
-		pr.send(bestRound, blockNumber, msgSigner)
+		pr.send(start, bestRound, blockNumber, msgSigner)
 	}
 	return ret
 }
 
-func (pr *puissantReporter) send(bestRound int, blockNumber uint64, msgSigner func(text []byte) []byte) {
+func (pr *puissantReporter) send(start time.Time, bestRound int, blockNumber uint64, msgSigner func(text []byte) []byte) {
 	if len(pr.data) == 0 {
 		return
 	}
@@ -190,12 +196,25 @@ func (pr *puissantReporter) send(bestRound int, blockNumber uint64, msgSigner fu
 		body.Result = append(body.Result, detail)
 	}
 
-	req, resp := fasthttp.AcquireRequest(), fasthttp.AcquireResponse()
-	defer fasthttp.ReleaseRequest(req)
-	defer fasthttp.ReleaseResponse(resp)
-	if err := doRequest(types.PuissantStatusReportURL, body, req, resp, msgSigner); err != nil {
-		log.Error("❌ report packing result failed", "err", err)
+	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
+	b, _ := json.Marshal(body)
+
+	req, err := http.NewRequest(http.MethodPost, types.PuissantStatusReportURL, bytes.NewBuffer(b))
+	if err != nil {
+		panic(err)
 	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("timestamp", timestamp)
+	req.Header.Set("sign", hexutil.Encode(msgSigner([]byte(timestamp))))
+
+	resp, err := pr.client.Do(req)
+	if err != nil {
+		log.Error("❌ report packing result failed", "err", err, "elapsed", time.Since(start))
+	} else if resp.StatusCode != http.StatusOK {
+		log.Error("❌ report packing result failed", "StatusCode", resp.StatusCode, "elapsed", time.Since(start))
+	}
+	_ = resp.Body.Close()
 }
 
 type tUploadData struct {
@@ -215,36 +234,4 @@ type tUploadTransaction struct {
 	GasUsed   uint64               `json:"gas_used"`
 	Status    puissantTxStatusCode `json:"status"`
 	RevertMsg string               `json:"revert_msg"`
-}
-
-func doRequest(url string, data interface{}, req *fasthttp.Request, resp *fasthttp.Response, msgSigner func([]byte) []byte) error {
-	req.SetRequestURI(url)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.SetMethod(http.MethodPost)
-
-	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
-	req.Header.Set("timestamp", timestamp)
-	req.Header.Set("sign", hexutil.Encode(msgSigner([]byte(timestamp))))
-
-	b, _ := json.Marshal(data)
-	req.SetBodyRaw(b)
-
-	return fasthttp.DoTimeout(req, resp, 2*time.Second)
-}
-
-func reportExpiredPuissant(expired []types.PuissantID, msgSigner func([]byte) []byte) {
-	req, resp := fasthttp.AcquireRequest(), fasthttp.AcquireResponse()
-	defer fasthttp.ReleaseRequest(req)
-	defer fasthttp.ReleaseResponse(resp)
-
-	var res []string
-	for _, id := range expired {
-		res = append(res, id.String())
-	}
-
-	if err := doRequest(types.PuissantReportExpiredURL, res, req, resp, msgSigner); err != nil {
-		log.Error("❌ report puissant-id-list failed", "err", err)
-	} else {
-		log.Info(" 🐶 report expired puissant", "size", len(expired), "statusCode", resp.StatusCode())
-	}
 }
