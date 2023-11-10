@@ -799,7 +799,7 @@ LOOP:
 				pendings[from] = append(pendings[from], tx.Tx.Tx)
 			}
 		}
-		
+
 		report, err := core.RunPuissantCommitter(
 			timeLeft,
 			work,
