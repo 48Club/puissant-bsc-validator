@@ -20,6 +20,25 @@ type puissantStatusCode uint8
 type puissantInfoCode uint8
 type puissantTxStatusCode uint8
 
+type tUploadData struct {
+	BlockNumber string             `json:"block"`
+	Result      []*tUploadPuissant `json:"result"`
+}
+
+type tUploadPuissant struct {
+	UUID   string                `json:"uuid"`
+	Status puissantStatusCode    `json:"status"`
+	Info   puissantInfoCode      `json:"info"`
+	Txs    []*tUploadTransaction `json:"txs"`
+}
+
+type tUploadTransaction struct {
+	TxHash    string               `json:"tx_hash"`
+	GasUsed   uint64               `json:"gas_used"`
+	Status    puissantTxStatusCode `json:"status"`
+	RevertMsg string               `json:"revert_msg"`
+}
+
 const (
 	PuissantStatusWellDone puissantStatusCode = 0
 	PuissantStatusPending  puissantStatusCode = 1
@@ -215,23 +234,4 @@ func (pr *puissantReporter) send(start time.Time, bestRound int, blockNumber uin
 		log.Error("❌ report packing result failed", "StatusCode", resp.StatusCode, "elapsed", time.Since(start))
 	}
 	_ = resp.Body.Close()
-}
-
-type tUploadData struct {
-	BlockNumber string             `json:"block"`
-	Result      []*tUploadPuissant `json:"result"`
-}
-
-type tUploadPuissant struct {
-	UUID   string                `json:"uuid"`
-	Status puissantStatusCode    `json:"status"`
-	Info   puissantInfoCode      `json:"info"`
-	Txs    []*tUploadTransaction `json:"txs"`
-}
-
-type tUploadTransaction struct {
-	TxHash    string               `json:"tx_hash"`
-	GasUsed   uint64               `json:"gas_used"`
-	Status    puissantTxStatusCode `json:"status"`
-	RevertMsg string               `json:"revert_msg"`
 }

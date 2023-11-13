@@ -736,10 +736,10 @@ func (w *worker) commitWork(interruptCh chan int32, timestamp int64) {
 
 	// Set the coinbase if the worker is running or it's required
 	var (
-		coinbase    common.Address
-		workList    = make([]*multiPackingWork, 0, 20)
-		pReporter   = core.NewPuissantReporter()
-		blockNumber uint64
+		coinbase common.Address
+		workList = make([]*multiPackingWork, 0, 20)
+		//pReporter   = core.NewPuissantReporter()
+		//blockNumber uint64
 	)
 	if w.isRunning() {
 		coinbase = w.etherbase()
@@ -778,7 +778,7 @@ LOOP:
 
 		// empty block at first round
 		if round == 0 {
-			blockNumber = work.Header.Number.Uint64()
+			//blockNumber = work.Header.Number.Uint64()
 			log.Info(" 📦 packing", "round", round, "elapsed", common.PrettyDuration(time.Since(roundStart)))
 			continue
 		}
@@ -807,11 +807,11 @@ LOOP:
 			pendingPuissant,
 			w.chain,
 			w.chainConfig,
-			w.eth.TxPool().DeletePuissantPackages,
+			w.eth.TxPool().DeletePuissantBundles,
 
 			lru2.NewCache[common.Hash, struct{}](1000),
 		)
-		pReporter.Update(report, round)
+		//pReporter.Update(report, round)
 		thisRound.err = err
 		thisRound.income = work.State.GetBalance(consensus.SystemAddress)
 
@@ -875,9 +875,9 @@ LOOP:
 	bestWork := pickTheMostProfitableWork(workList)
 	_ = w.commit(bestWork.work, w.fullTaskHook, true, start)
 
-	if p, ok := w.engine.(*parlia.Parlia); ok {
-		go pReporter.Done(bestWork.round, blockNumber, bestWork.income, w.sendMessage, p.MakeTextSigner())
-	}
+	//if p, ok := w.engine.(*parlia.Parlia); ok {
+	//	go pReporter.Done(bestWork.round, blockNumber, bestWork.income, w.sendMessage, p.MakeTextSigner())
+	//}
 }
 
 // commit runs any post-transaction state modifications, assembles the final block

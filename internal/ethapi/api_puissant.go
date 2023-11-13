@@ -56,6 +56,7 @@ func (s *PuissantAPI) SendPuissant(ctx context.Context, args SendPuissantArgs) e
 	for _, each := range args.Revertible {
 		revertibleSet.Add(each)
 	}
+	bundlePID := types.GenPuissantID(txs, revertibleSet, args.MaxTimestamp)
 
 	for index, encodedTx := range args.Txs {
 		tx := new(types.Transaction)
@@ -80,6 +81,7 @@ func (s *PuissantAPI) SendPuissant(ctx context.Context, args SendPuissantArgs) e
 		if revertibleSet.Contains(tx.Hash()) {
 			tx.SetPuissantAcceptReverting()
 		}
+		tx.SetPuissantID(bundlePID)
 		txs = append(txs, tx)
 	}
 	// check duplicate transaction in txs
@@ -87,9 +89,5 @@ func (s *PuissantAPI) SendPuissant(ctx context.Context, args SendPuissantArgs) e
 		return errors.New("duplicate transaction found")
 	}
 
-	pid := types.GenPuissantID(txs, revertibleSet, args.MaxTimestamp)
-	for _, tx := range txs {
-		tx.SetPuissantID(pid)
-	}
-	return s.b.SendPuissant(ctx, pid, txs, args.MaxTimestamp, args.RelaySignature)
+	return s.b.SendPuissant(ctx, bundlePID, txs, args.MaxTimestamp, args.RelaySignature)
 }

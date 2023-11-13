@@ -463,8 +463,8 @@ func (p *TxPool) PendingTxsAndPuissant(enforceTips bool, blockTimestamp uint64) 
 	return p.Pending(enforceTips), p.puissantPool.PendingPuissantBundles(blockTimestamp)
 }
 
-func (p *TxPool) DeletePuissantPackages(set mapset.Set[types.PuissantID]) {
+func (p *TxPool) DeletePuissantBundles(set mapset.Set[types.PuissantID]) {
 	if p.puissantPool != nil {
-		p.puissantPool.DeletePuissantPackages(set)
+		p.puissantPool.DeletePuissantBundles(set)
 	}
 }

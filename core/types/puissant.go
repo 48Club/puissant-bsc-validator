@@ -52,6 +52,13 @@ func (pp *PuissantBundle) HasHigherBidPriceIntCmp(with *big.Int) bool {
 	return pp.bidPrice.Cmp(with) > 0
 }
 
+func (pp *PuissantBundle) ReplacedByNewPuissant(np *PuissantBundle, priceBump uint64) bool {
+	oldP := new(big.Int).Mul(pp.bidPrice, big.NewInt(100+int64(priceBump)))
+	newP := new(big.Int).Mul(np.bidPrice, big.NewInt(100))
+
+	return newP.Cmp(oldP) > 0
+}
+
 func (pp *PuissantBundle) BidPrice() *big.Int {
 	return new(big.Int).Set(pp.bidPrice)
 }

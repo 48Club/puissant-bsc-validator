@@ -185,8 +185,8 @@ func (pool *PuissantPool) AddPuissantBundle(pid types.PuissantID, txs types.Tran
 	senderID, _ := types.Sender(pool.signer, txs[0])
 
 	newPuissant := types.NewPuissantBundle(pid, txs, maxTimestamp)
-	if v, has := pool.puissantPool[senderID]; has && v.HasHigherBidPriceThan(newPuissant) {
-		return errors.New("rejected, only one pending-puissant per sender is allowed")
+	if v, has := pool.puissantPool[senderID]; has && !v.ReplacedByNewPuissant(newPuissant, pool.config.PriceBump) {
+		return errors.New("insufficient bid price bump for overwriting")
 	} else {
 		pool.puissantPool[senderID] = newPuissant
 	}
@@ -306,7 +306,7 @@ func (pool *PuissantPool) PendingPuissantBundles(blockTimestamp uint64) types.Pu
 	return poolPx[:pool.config.MaxPuissantPreBlock]
 }
 
-func (pool *PuissantPool) DeletePuissantPackages(set mapset.Set[types.PuissantID]) {
+func (pool *PuissantPool) DeletePuissantBundles(set mapset.Set[types.PuissantID]) {
 	if set.Cardinality() == 0 {
 		return
 	}
