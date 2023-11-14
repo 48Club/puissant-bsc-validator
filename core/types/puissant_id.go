@@ -53,7 +53,7 @@ func (p PuissantID) setBytes(b []byte) {
 
 func GenPuissantID(txs []*Transaction, revertible mapset.Set[common.Hash], maxTimestamp uint64) PuissantID {
 	var msg bytes.Buffer
-	msg.Grow(len(txs)*common.HashLength + 4)
+	msg.Grow(len(txs)*(common.HashLength+1) + 4)
 
 	for _, tx := range txs {
 		msg.Write(tx.Hash().Bytes())
@@ -69,5 +69,5 @@ func GenPuissantID(txs []*Transaction, revertible mapset.Set[common.Hash], maxTi
 	msg.WriteByte(byte(maxTimestamp >> 16))
 	msg.WriteByte(byte(maxTimestamp >> 24))
 
-	return PuissantID(uuid.NewMD5(uuid.NameSpaceDNS, []byte(msg.String())))
+	return PuissantID(uuid.NewMD5(uuid.NameSpaceDNS, msg.Bytes()))
 }

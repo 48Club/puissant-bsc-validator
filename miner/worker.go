@@ -17,19 +17,15 @@
 package miner
 
 import (
-	"context"
 	"errors"
 	"fmt"
-	"github.com/ethereum/go-ethereum/core/txpool"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
-	"math"
 	"math/big"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	lru2 "github.com/ethereum/go-ethereum/common/lru"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/misc/eip1559"
 	"github.com/ethereum/go-ethereum/consensus/parlia"
@@ -697,7 +693,7 @@ func (w *worker) prepareWork(genParams *generateParams) (*core.MinerEnvironment,
 	// Could potentially happen if starting to mine in an odd state.
 	// Note genParams.coinbase can be different with header.Coinbase
 	// since clique algorithm can modify the coinbase field in header.
-	env, err := w.makeEnv(parent.Root, header)
+	env, err := w.makeEnv(parent, header, genParams.coinbase)
 	if err != nil {
 		log.Error("Failed to create sealing context", "err", err)
 		return nil, err
@@ -723,161 +719,6 @@ func (w *worker) generateWork(params *generateParams) (*types.Block, *big.Int, e
 		return nil, nil, err
 	}
 	return block, fees, nil
-}
-
-// commitWork generates several new sealing tasks based on the parent block
-// and submit them to the sealer.
-func (w *worker) commitWork(interruptCh chan int32, timestamp int64) {
-	// Abort committing if node is still syncing
-	if w.syncing.Load() {
-		return
-	}
-	start := time.Now()
-
-	// Set the coinbase if the worker is running or it's required
-	var (
-		coinbase common.Address
-		workList = make([]*multiPackingWork, 0, 20)
-		//pReporter   = core.NewPuissantReporter()
-		//blockNumber uint64
-	)
-	if w.isRunning() {
-		coinbase = w.etherbase()
-		if coinbase == (common.Address{}) {
-			log.Error("Refusing to mine without etherbase")
-			return
-		}
-	}
-
-	// validator can try several times to get the most profitable block,
-	// as long as the timestamp is not reached.
-LOOP:
-	for round := 0; round < math.MaxInt64; round++ {
-		roundStart := time.Now()
-
-		work, err := w.prepareWork(&generateParams{
-			timestamp: uint64(timestamp),
-			coinbase:  coinbase,
-		})
-		if err != nil {
-			return
-		}
-		thisRound := &multiPackingWork{round: round, work: work, income: new(big.Int)}
-		workList = append(workList, thisRound)
-
-		timeLeft := blockMiningTimeLeft(work.Header.Time)
-		if timeLeft <= 0 {
-			log.Warn(" 📦 ⚠️ not enough time for this round, jump out",
-				"round", round,
-				"income", types.WeiToEther(thisRound.income),
-				"elapsed", common.PrettyDuration(time.Since(roundStart)),
-				"timeLeft", timeLeft,
-			)
-			break
-		}
-
-		// empty block at first round
-		if round == 0 {
-			//blockNumber = work.Header.Number.Uint64()
-			log.Info(" 📦 packing", "round", round, "elapsed", common.PrettyDuration(time.Since(roundStart)))
-			continue
-		}
-
-		var (
-			pendingTxs      map[common.Address][]*txpool.LazyTransaction
-			pendingPuissant types.PuissantBundles
-		)
-		if work.Header.Difficulty.Cmp(diffInTurn) == 0 {
-			pendingTxs, pendingPuissant = w.eth.TxPool().PendingTxsAndPuissant(false, work.Header.Time)
-		} else {
-			pendingTxs = w.eth.TxPool().Pending(false)
-		}
-
-		var pendings = make(map[common.Address][]*types.Transaction)
-		for from, txs := range pendingTxs {
-			for _, tx := range txs {
-				pendings[from] = append(pendings[from], tx.Tx.Tx)
-			}
-		}
-
-		report, err := core.RunPuissantCommitter(
-			timeLeft,
-			work,
-			pendings,
-			pendingPuissant,
-			w.chain,
-			w.chainConfig,
-			w.eth.TxPool().DeletePuissantBundles,
-
-			lru2.NewCache[common.Hash, struct{}](1000),
-		)
-		//pReporter.Update(report, round)
-		thisRound.err = err
-		thisRound.income = work.State.GetBalance(consensus.SystemAddress)
-
-		roundElapsed := time.Since(roundStart)
-		select {
-		case signal, ok := <-interruptCh:
-			if !ok {
-				// should never be here, since interruptCh should not be read before
-				log.Warn("commit transactions stopped unknown")
-				return
-			}
-			if err := signalToErr(signal); errors.Is(err, errBlockInterruptedByNewHead) {
-				log.Debug("commitWork abort", "err", err)
-				return
-			} else if errors.Is(err, errBlockInterruptedByTimeout) || errors.Is(err, errBlockInterruptedByOutOfGas) {
-				// break the loop to get the best work
-				log.Debug("commitWork finish", "reason", err)
-				break LOOP
-			}
-		default:
-		}
-
-		roundInterval := repackingInterval(roundElapsed, work.Header.Time)
-
-		log.Info(" 📦 packing",
-			"round", round,
-			"txs", work.PackedTxs.Len(),
-			"triedPuissant", len(report),
-			"income", types.WeiToEther(thisRound.income),
-			"elapsed", common.PrettyDuration(roundElapsed),
-			"timeLeft", blockMiningTimeLeft(work.Header.Time),
-			"interval", common.PrettyDuration(roundInterval),
-			"err", thisRound.err,
-		)
-
-		//break LOOP // TODO testnet
-
-		if roundInterval > 0 {
-			ctx, cancel := context.WithTimeout(context.Background(), roundInterval)
-			go func() {
-				for {
-					select {
-					case <-ctx.Done():
-						return
-					case <-interruptCh:
-						cancel()
-					}
-				}
-			}()
-			<-ctx.Done()
-			if errors.Is(ctx.Err(), context.Canceled) {
-				log.Info(" ⚠️ jump out due to interruption")
-				return
-			}
-		} else {
-			// no time for another round, commit now
-			break LOOP
-		}
-	}
-	// get the most profitable work
-	bestWork := pickTheMostProfitableWork(workList)
-	_ = w.commit(bestWork.work, w.fullTaskHook, true, start)
-
-	//if p, ok := w.engine.(*parlia.Parlia); ok {
-	//	go pReporter.Done(bestWork.round, blockNumber, bestWork.income, w.sendMessage, p.MakeTextSigner())
-	//}
 }
 
 // commit runs any post-transaction state modifications, assembles the final block
