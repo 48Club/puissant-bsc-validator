@@ -1,9 +1,8 @@
 package parlia
 
 import (
-	"crypto/rand"
 	"fmt"
-	mrand "math/rand"
+	"math/rand"
 	"testing"
 
 	"golang.org/x/crypto/sha3"
@@ -48,7 +47,7 @@ func simulateValidatorOutOfService(totalValidators int, downValidators int) {
 		validators[i] = true
 		down[i] = i
 	}
-	mrand.Shuffle(totalValidators, func(i, j int) {
+	rand.Shuffle(totalValidators, func(i, j int) {
 		down[i], down[j] = down[j], down[i]
 	})
 	for i := 0; i < downValidators; i++ {
@@ -126,8 +125,8 @@ func simulateValidatorOutOfService(totalValidators int, downValidators int) {
 }
 
 func producerBlockDelay(candidates map[int]bool, height, numOfValidators int) (int, uint64) {
-	s := mrand.NewSource(int64(height))
-	r := mrand.New(s)
+	s := rand.NewSource(int64(height))
+	r := rand.New(s)
 	n := numOfValidators
 	backOffSteps := make([]int, 0, n)
 	for idx := 0; idx < n; idx++ {

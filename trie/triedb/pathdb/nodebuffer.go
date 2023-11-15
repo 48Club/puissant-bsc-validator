@@ -29,8 +29,6 @@ import (
 	"github.com/ethereum/go-ethereum/trie/trienode"
 )
 
-var _ trienodebuffer = &nodebuffer{}
-
 // nodebuffer is a collection of modified trie nodes to aggregate the disk
 // write. The content of the nodebuffer must be checked before diving into
 // disk (since it basically is not-yet-written data).
@@ -73,7 +71,7 @@ func (b *nodebuffer) node(owner common.Hash, path []byte, hash common.Hash) (*tr
 	if n.Hash != hash {
 		dirtyFalseMeter.Mark(1)
 		log.Error("Unexpected trie node in node buffer", "owner", owner, "path", path, "expect", hash, "got", n.Hash)
-		return nil, newUnexpectedNodeError("dirty", hash, n.Hash, owner, path, n.Blob)
+		return nil, newUnexpectedNodeError("dirty", hash, n.Hash, owner, path)
 	}
 	return n, nil
 }
@@ -82,7 +80,7 @@ func (b *nodebuffer) node(owner common.Hash, path []byte, hash common.Hash) (*tr
 // the ownership of the nodes map which belongs to the bottom-most diff layer.
 // It will just hold the node references from the given map which are safe to
 // copy.
-func (b *nodebuffer) commit(nodes map[common.Hash]map[string]*trienode.Node) trienodebuffer {
+func (b *nodebuffer) commit(nodes map[common.Hash]map[string]*trienode.Node) *nodebuffer {
 	var (
 		delta         int64
 		overwrite     int64
@@ -99,14 +97,14 @@ func (b *nodebuffer) commit(nodes map[common.Hash]map[string]*trienode.Node) tri
 			current = make(map[string]*trienode.Node)
 			for path, n := range subset {
 				current[path] = n
-				delta += int64(len(n.Blob) + len(path) + len(owner))
+				delta += int64(len(n.Blob) + len(path))
 			}
 			b.nodes[owner] = current
 			continue
 		}
 		for path, n := range subset {
 			if orig, exist := current[path]; !exist {
-				delta += int64(len(n.Blob) + len(path) + len(owner))
+				delta += int64(len(n.Blob) + len(path))
 			} else {
 				delta += int64(len(n.Blob) - len(orig.Blob))
 				overwrite++
@@ -219,11 +217,7 @@ func (b *nodebuffer) flush(db ethdb.KeyValueStore, clean *fastcache.Cache, id ui
 	}
 	var (
 		start = time.Now()
-		// Although the calculation of b.size has been as accurate as possible,
-		// some omissions were still found during testing and code review, but
-		// we are still not sure it is completely accurate. For better protection,
-		// some redundancy is added here.
-		batch = db.NewBatchWithSize(int(float64(b.size) * DefaultBatchRedundancyRate))
+		batch = db.NewBatchWithSize(int(b.size))
 	)
 	nodes := writeNodes(batch, b.nodes, clean)
 	rawdb.WritePersistentStateID(batch, id)
@@ -278,19 +272,4 @@ func cacheKey(owner common.Hash, path []byte) []byte {
 		return path
 	}
 	return append(owner.Bytes(), path...)
-}
-
-// getSize return the nodebuffer used size.
-func (b *nodebuffer) getSize() (uint64, uint64) {
-	return b.size, 0
-}
-
-// getAllNodes return all the trie nodes are cached in nodebuffer.
-func (b *nodebuffer) getAllNodes() map[common.Hash]map[string]*trienode.Node {
-	return b.nodes
-}
-
-// getLayers return the size of cached difflayers.
-func (b *nodebuffer) getLayers() uint64 {
-	return b.layers
 }

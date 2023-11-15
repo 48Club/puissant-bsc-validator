@@ -40,26 +40,18 @@ const (
 	// defaultCleanSize is the default memory allowance of clean cache.
 	defaultCleanSize = 16 * 1024 * 1024
 
-	// MaxDirtyBufferSize is the maximum memory allowance of node buffer.
+	// maxBufferSize is the maximum memory allowance of node buffer.
 	// Too large nodebuffer will cause the system to pause for a long
 	// time when write happens. Also, the largest batch that pebble can
 	// support is 4GB, node will panic if batch size exceeds this limit.
-	MaxDirtyBufferSize = 256 * 1024 * 1024
+	maxBufferSize = 256 * 1024 * 1024
 
-	// DefaultDirtyBufferSize is the default memory allowance of node buffer
+	// DefaultBufferSize is the default memory allowance of node buffer
 	// that aggregates the writes from above until it's flushed into the
 	// disk. It's meant to be used once the initial sync is finished.
 	// Do not increase the buffer size arbitrarily, otherwise the system
 	// pause time will increase when the database writes happen.
-	DefaultDirtyBufferSize = 64 * 1024 * 1024
-
-	// DefaultBackgroundFlushInterval defines the default the wait interval
-	// that background node cache flush disk.
-	DefaultBackgroundFlushInterval = 3
-
-	// DefaultBatchRedundancyRate defines the batch size, compatible write
-	// size calculation is inaccurate
-	DefaultBatchRedundancyRate = 1.1
+	DefaultBufferSize = 64 * 1024 * 1024
 )
 
 // layer is the interface implemented by all state layers which includes some
@@ -94,7 +86,6 @@ type layer interface {
 
 // Config contains the settings for database.
 type Config struct {
-	SyncFlush      bool   // Flag of trienodebuffer sync flush cache to disk
 	StateHistory   uint64 // Number of recent blocks to maintain state history for
 	CleanCacheSize int    // Maximum memory allowance (in bytes) for caching clean nodes
 	DirtyCacheSize int    // Maximum memory allowance (in bytes) for caching dirty nodes
@@ -105,9 +96,9 @@ type Config struct {
 // unreasonable or unworkable.
 func (c *Config) sanitize() *Config {
 	conf := *c
-	if conf.DirtyCacheSize > MaxDirtyBufferSize {
-		log.Warn("Sanitizing invalid node buffer size", "provided", common.StorageSize(conf.DirtyCacheSize), "updated", common.StorageSize(MaxDirtyBufferSize))
-		conf.DirtyCacheSize = MaxDirtyBufferSize
+	if conf.DirtyCacheSize > maxBufferSize {
+		log.Warn("Sanitizing invalid node buffer size", "provided", common.StorageSize(conf.DirtyCacheSize), "updated", common.StorageSize(maxBufferSize))
+		conf.DirtyCacheSize = maxBufferSize
 	}
 	return &conf
 }
@@ -116,7 +107,7 @@ func (c *Config) sanitize() *Config {
 var Defaults = &Config{
 	StateHistory:   params.FullImmutabilityThreshold,
 	CleanCacheSize: defaultCleanSize,
-	DirtyCacheSize: DefaultDirtyBufferSize,
+	DirtyCacheSize: DefaultBufferSize,
 }
 
 // ReadOnly is the config in order to open database in read only mode.
@@ -189,7 +180,7 @@ func New(diskdb ethdb.Database, config *Config) *Database {
 			log.Warn("Truncated extra state histories", "number", pruned)
 		}
 	}
-	log.Warn("Path-based state scheme is an experimental feature", "sync", db.config.SyncFlush)
+	log.Warn("Path-based state scheme is an experimental feature")
 	return db
 }
 
@@ -292,7 +283,7 @@ func (db *Database) Reset(root common.Hash) error {
 	}
 	// Re-construct a new disk layer backed by persistent state
 	// with **empty clean cache and node buffer**.
-	dl := newDiskLayer(root, 0, db, nil, NewTrieNodeBuffer(db.config.SyncFlush, db.bufferSize, nil, 0))
+	dl := newDiskLayer(root, 0, db, nil, newNodeBuffer(db.bufferSize, nil, 0))
 	db.tree.reset(dl)
 	log.Info("Rebuilt trie database", "root", root)
 	return nil
@@ -393,16 +384,16 @@ func (db *Database) Close() error {
 
 // Size returns the current storage size of the memory cache in front of the
 // persistent database layer.
-func (db *Database) Size() (diffs common.StorageSize, nodes common.StorageSize, immutableNodes common.StorageSize) {
+func (db *Database) Size() (size common.StorageSize) {
 	db.tree.forEach(func(layer layer) {
 		if diff, ok := layer.(*diffLayer); ok {
-			diffs += common.StorageSize(diff.memory)
+			size += common.StorageSize(diff.memory)
 		}
 		if disk, ok := layer.(*diskLayer); ok {
-			nodes, immutableNodes = disk.size()
+			size += disk.size()
 		}
 	})
-	return diffs, nodes, immutableNodes
+	return size
 }
 
 // Initialized returns an indicator if the state data is already
@@ -422,9 +413,9 @@ func (db *Database) SetBufferSize(size int) error {
 	db.lock.Lock()
 	defer db.lock.Unlock()
 
-	if size > MaxDirtyBufferSize {
-		log.Info("Capped node buffer size", "provided", common.StorageSize(size), "adjusted", common.StorageSize(MaxDirtyBufferSize))
-		size = MaxDirtyBufferSize
+	if size > maxBufferSize {
+		log.Info("Capped node buffer size", "provided", common.StorageSize(size), "adjusted", common.StorageSize(maxBufferSize))
+		size = maxBufferSize
 	}
 	db.bufferSize = size
 	return db.tree.bottom().setBufferSize(db.bufferSize)
@@ -433,11 +424,4 @@ func (db *Database) SetBufferSize(size int) error {
 // Scheme returns the node scheme used in the database.
 func (db *Database) Scheme() string {
 	return rawdb.PathScheme
-}
-
-// Head return the top non-fork difflayer/disklayer root hash for rewinding.
-func (db *Database) Head() common.Hash {
-	db.lock.Lock()
-	defer db.lock.Unlock()
-	return db.tree.front()
 }

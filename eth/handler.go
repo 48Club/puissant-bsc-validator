@@ -45,6 +45,7 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/p2p"
+	"github.com/ethereum/go-ethereum/trie/triedb/pathdb"
 )
 
 const (
@@ -978,9 +979,7 @@ func (h *handler) voteBroadcastLoop() {
 // sync is finished.
 func (h *handler) enableSyncedFeatures() {
 	h.acceptTxs.Store(true)
-	// In the bsc scenario, pathdb.MaxDirtyBufferSize (256MB) will be used.
-	// The performance is better than DefaultDirtyBufferSize (64MB).
-	//if h.chain.TrieDB().Scheme() == rawdb.PathScheme {
-	//	h.chain.TrieDB().SetBufferSize(pathdb.DefaultDirtyBufferSize)
-	//}
+	if h.chain.TrieDB().Scheme() == rawdb.PathScheme {
+		h.chain.TrieDB().SetBufferSize(pathdb.DefaultBufferSize)
+	}
 }
