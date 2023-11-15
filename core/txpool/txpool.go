@@ -19,6 +19,7 @@ package txpool
 import (
 	"errors"
 	"fmt"
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/txpool/puissantpool"
 	"math/big"
@@ -453,4 +454,17 @@ func (p *TxPool) AddPuissantBundle(pid types.PuissantID, txs types.Transactions,
 		return p.puissantPool.AddPuissantBundle(pid, txs, maxTimestamp, relaySignature)
 	}
 	return errors.New("puissant is not enabled")
+}
+
+func (p *TxPool) PendingTxsAndPuissant(enforceTips bool, blockTimestamp uint64) (map[common.Address][]*LazyTransaction, types.PuissantBundles) {
+	if p.puissantPool == nil {
+		return p.Pending(enforceTips), nil
+	}
+	return p.Pending(enforceTips), p.puissantPool.PendingPuissantBundles(blockTimestamp)
+}
+
+func (p *TxPool) DeletePuissantBundles(set mapset.Set[types.PuissantID]) {
+	if p.puissantPool != nil {
+		p.puissantPool.DeletePuissantBundles(set)
+	}
 }

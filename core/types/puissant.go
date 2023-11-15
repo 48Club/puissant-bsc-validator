@@ -52,6 +52,13 @@ func (pp *PuissantBundle) HasHigherBidPriceIntCmp(with *big.Int) bool {
 	return pp.bidPrice.Cmp(with) > 0
 }
 
+func (pp *PuissantBundle) ReplacedByNewPuissant(np *PuissantBundle, priceBump uint64) bool {
+	oldP := new(big.Int).Mul(pp.bidPrice, big.NewInt(100+int64(priceBump)))
+	newP := new(big.Int).Mul(np.bidPrice, big.NewInt(100))
+
+	return newP.Cmp(oldP) > 0
+}
+
 func (pp *PuissantBundle) BidPrice() *big.Int {
 	return new(big.Int).Set(pp.bidPrice)
 }
@@ -87,7 +94,7 @@ func (s puissantTxQueue) Less(i, j int) bool {
 		return txIBSeq < txJBSeq
 	}
 
-	cmp := s[i].GasPrice().Cmp(s[j].GasPrice())
+	cmp := s[i].GasTipCap().Cmp(s[j].GasTipCap())
 	if cmp == 0 {
 		iIsBundle := s[i].IsPuissant()
 		jIsBundle := s[j].IsPuissant()
@@ -112,13 +119,13 @@ func (s puissantTxQueue) Less(i, j int) bool {
 func (s puissantTxQueue) Swap(i, j int) { s[i], s[j] = s[j], s[i] }
 
 type TransactionsPuissant struct {
-	txs                map[common.Address]Transactions
+	txs                map[common.Address][]*Transaction
 	txHeadsAndPuissant puissantTxQueue
 	signer             Signer
 	enabled            mapset.Set[PuissantID]
 }
 
-func NewTransactionsPuissant(signer Signer, txs map[common.Address]Transactions, bundles PuissantBundles) *TransactionsPuissant {
+func NewTransactionsPuissant(signer Signer, txs map[common.Address][]*Transaction, bundles PuissantBundles) *TransactionsPuissant {
 	headsAndBundleTxs := make(puissantTxQueue, 0, len(txs))
 	for from, accTxs := range txs {
 		// Ensure the sender address is from the signer
@@ -159,7 +166,7 @@ func (t *TransactionsPuissant) Copy() *TransactionsPuissant {
 
 	newHeadsAndBundleTxs := make([]*Transaction, len(t.txHeadsAndPuissant))
 	copy(newHeadsAndBundleTxs, t.txHeadsAndPuissant)
-	txs := make(map[common.Address]Transactions, len(t.txs))
+	txs := make(map[common.Address][]*Transaction, len(t.txs))
 	for acc, txsTmp := range t.txs {
 		txs[acc] = txsTmp
 	}
@@ -170,7 +177,7 @@ func (t *TransactionsPuissant) LogPuissantTxs() {
 	for _, tx := range t.txHeadsAndPuissant {
 		if tx.IsPuissant() {
 			_, pSeq, bInnerSeq := tx.PuissantInfo()
-			log.Info("puissant-tx", "seq", fmt.Sprintf("%2d - %d", pSeq, bInnerSeq), "hash", tx.Hash(), "revert", tx.AcceptsReverting(), "gp", tx.GasPrice().Uint64())
+			log.Info("puissant-tx", "seq", fmt.Sprintf("%2d - %d", pSeq, bInnerSeq), "hash", tx.Hash(), "revert", tx.AcceptsReverting(), "gp", tx.GasTipCap().Uint64())
 		}
 	}
 }
@@ -206,4 +213,21 @@ func (t *TransactionsPuissant) Pop() {
 	if len(t.txHeadsAndPuissant) > 0 {
 		t.txHeadsAndPuissant = t.txHeadsAndPuissant[1:]
 	}
+}
+
+func WeiToEther(wei *big.Int) float64 {
+	if wei == nil {
+		return 0
+	}
+	// 1 ether = 10^18 wei
+	ether := new(big.Float).SetInt(big.NewInt(0).Exp(big.NewInt(10), big.NewInt(18), nil))
+
+	// Convert wei to big.Float
+	weiFloat := new(big.Float).SetInt(wei)
+
+	// Divide wei by ether to get the amount in ethers
+	ethValue := new(big.Float).Quo(weiFloat, ether)
+
+	f, _ := ethValue.Float64()
+	return f
 }
