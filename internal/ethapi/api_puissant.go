@@ -68,7 +68,7 @@ func (s *PuissantAPI) SendPuissant(ctx context.Context, args SendPuissantArgs) e
 		}
 
 		// txs-sort-check
-		if txGP := tx.GasPrice(); tmpGasPrice == nil || tmpGasPrice.Cmp(txGP) >= 0 {
+		if txGP := tx.GasTipCap(); tmpGasPrice == nil || tmpGasPrice.Cmp(txGP) >= 0 {
 			tmpGasPrice = txGP
 		} else {
 			return errors.New("invalid, require txs descending sort by gas price")
@@ -87,9 +87,10 @@ func (s *PuissantAPI) SendPuissant(ctx context.Context, args SendPuissantArgs) e
 		return errors.New("duplicate transaction found")
 	}
 
-	pid := types.GenPuissantID(txs)
+	bundlePID := types.GenPuissantID(txs, revertibleSet, args.MaxTimestamp)
 	for _, tx := range txs {
-		tx.SetPuissantID(pid)
+		tx.SetPuissantID(bundlePID)
 	}
-	return s.b.SendPuissant(ctx, pid, txs, args.MaxTimestamp, args.RelaySignature)
+
+	return s.b.SendPuissant(ctx, bundlePID, txs, args.MaxTimestamp, args.RelaySignature)
 }
