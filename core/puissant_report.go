@@ -155,6 +155,10 @@ func (pr *puissantReporter) Done(bestRound int, blockNumber uint64, blockIncome 
 	}
 
 	for index, each := range puissantList {
+		if each.Status == PuissantStatusWellDone {
+			continue
+		}
+
 		incomeF := types.WeiToEther(each.Income)
 		text += fmt.Sprintf("*Rank: %d, %.3fbnb*\n", index+1, incomeF)
 		for txSeq, tx := range each.Txs {

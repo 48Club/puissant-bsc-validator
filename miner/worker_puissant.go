@@ -14,8 +14,8 @@ import (
 	"errors"
 	"fmt"
 	"github.com/ethereum/go-ethereum/common"
-	lru2 "github.com/ethereum/go-ethereum/common/lru"
 	"github.com/ethereum/go-ethereum/consensus"
+	"github.com/ethereum/go-ethereum/consensus/parlia"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/txpool"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -75,10 +75,10 @@ func (w *worker) commitWork(interruptCh chan int32, timestamp int64) {
 
 	// Set the coinbase if the worker is running or it's required
 	var (
-		coinbase common.Address
-		workList = make([]*multiPackingWork, 0, 20)
-		//pReporter   = core.NewPuissantReporter()
-		//blockNumber uint64
+		coinbase    common.Address
+		workList    = make([]*multiPackingWork, 0, 20)
+		pReporter   = core.NewPuissantReporter()
+		blockNumber uint64
 	)
 	if w.isRunning() {
 		coinbase = w.etherbase()
@@ -94,129 +94,120 @@ LOOP:
 	for round := 0; round < math.MaxInt64; round++ {
 		roundStart := time.Now()
 
-		work, err := w.prepareWork(&generateParams{
-			timestamp: uint64(timestamp),
-			coinbase:  coinbase,
-		})
+		work, err := w.prepareWork(&generateParams{timestamp: uint64(timestamp), coinbase: coinbase})
 		if err != nil {
 			return
 		}
 		thisRound := &multiPackingWork{round: round, work: work, income: new(big.Int)}
 		workList = append(workList, thisRound)
 
-		timeLeft := blockMiningTimeLeft(work.Header.Time)
-		if timeLeft <= 0 {
-			log.Warn(" 📦 ⚠️ not enough time for this round, jump out",
-				"round", round,
-				"income", types.WeiToEther(thisRound.income),
-				"elapsed", common.PrettyDuration(time.Since(roundStart)),
-				"timeLeft", timeLeft,
-			)
+		timeLeft := w.engine.Delay(w.chain, work.Header, &w.config.DelayLeftOver)
+		if timeLeft == nil {
+			log.Error("commitWork delay is nil, something is wrong")
+			return
+		} else if *timeLeft <= 0 {
+			log.Warn("Not enough time for this round, jump out", "round", round, "elapsed", common.PrettyDuration(time.Since(roundStart)), "timeLeft", *timeLeft)
 			break
 		}
 
 		// empty block at first round
 		if round == 0 {
-			//blockNumber = work.Header.Number.Uint64()
-			log.Info(" 📦 packing", "round", round, "elapsed", common.PrettyDuration(time.Since(roundStart)))
+			blockNumber = work.Header.Number.Uint64()
 			continue
 		}
 
 		var (
+			ctx, cancel = context.WithTimeout(context.Background(), *timeLeft)
+
+			isInturn = work.Header.Difficulty.Cmp(diffInTurn) == 0
+
 			pendingTxs      map[common.Address][]*txpool.LazyTransaction
 			pendingPuissant types.PuissantBundles
 		)
-		if work.Header.Difficulty.Cmp(diffInTurn) == 0 {
+		if isInturn {
 			pendingTxs, pendingPuissant = w.eth.TxPool().PendingTxsAndPuissant(false, work.Header.Time)
 		} else {
 			pendingTxs = w.eth.TxPool().Pending(false)
 		}
 
-		var pendings = make(map[common.Address][]*types.Transaction)
+		var pendingPubPool = make(map[common.Address][]*types.Transaction, len(pendingTxs))
 		for from, txs := range pendingTxs {
 			for _, tx := range txs {
-				pendings[from] = append(pendings[from], tx.Tx.Tx)
+				pendingPubPool[from] = append(pendingPubPool[from], tx.Tx.Tx)
 			}
 		}
 
-		report, err := core.RunPuissantCommitter(
-			timeLeft,
+		report, abort, err := core.RunPuissantCommitter(
+			ctx,
+			interruptCh,
+			signalToErr,
+
 			work,
-			pendings,
+			pendingPubPool,
 			pendingPuissant,
 			w.chain,
 			w.chainConfig,
 			w.eth.TxPool().DeletePuissantBundles,
-
-			lru2.NewCache[common.Hash, struct{}](1000),
 		)
-		//pReporter.Update(report, round)
-		thisRound.err = err
-		thisRound.income = work.State.GetBalance(consensus.SystemAddress)
-
-		roundElapsed := time.Since(roundStart)
-		select {
-		case signal, ok := <-interruptCh:
-			if !ok {
-				// should never be here, since interruptCh should not be read before
-				log.Warn("commit transactions stopped unknown")
-				return
-			}
-			if err := signalToErr(signal); errors.Is(err, errBlockInterruptedByNewHead) {
-				log.Debug("commitWork abort", "err", err)
-				return
-			} else if errors.Is(err, errBlockInterruptedByTimeout) || errors.Is(err, errBlockInterruptedByOutOfGas) {
-				// break the loop to get the best work
-				log.Debug("commitWork finish", "reason", err)
-				break LOOP
-			}
-		default:
+		cancel()
+		if abort {
+			return
 		}
 
-		roundInterval := repackingInterval(roundElapsed, work.Header.Time)
+		thisRound.err = err
+		thisRound.income = work.State.GetBalance(consensus.SystemAddress)
+		pReporter.Update(report, round)
 
-		log.Info(" 📦 packing",
+		roundElapsed := time.Since(roundStart)
+
+		timeLeft = w.engine.Delay(w.chain, work.Header, &w.config.DelayLeftOver)
+		if timeLeft == nil {
+			return
+		}
+
+		roundInterval := repackingInterval(roundElapsed, *timeLeft)
+
+		log.Info("tried packing",
+			"block", blockNumber,
 			"round", round,
 			"txs", work.PackedTxs.Len(),
-			"triedPuissant", len(report),
+			"bundles", len(report),
 			"income", types.WeiToEther(thisRound.income),
 			"elapsed", common.PrettyDuration(roundElapsed),
-			"timeLeft", blockMiningTimeLeft(work.Header.Time),
+			"timeLeft", common.PrettyDuration(*timeLeft),
 			"interval", common.PrettyDuration(roundInterval),
 			"err", thisRound.err,
 		)
 
-		//break LOOP // TODO testnet
-
-		if roundInterval > 0 {
-			ctx, cancel := context.WithTimeout(context.Background(), roundInterval)
-			go func() {
-				for {
-					select {
-					case <-ctx.Done():
-						return
-					case <-interruptCh:
-						cancel()
-					}
-				}
-			}()
-			<-ctx.Done()
-			if errors.Is(ctx.Err(), context.Canceled) {
-				log.Info(" ⚠️ jump out due to interruption")
-				return
-			}
-		} else {
+		if roundInterval <= 0 {
 			// no time for another round, commit now
 			break LOOP
+		}
+
+		// wait for the next round, meanwhile check the interrupt signal
+		ctx, cancel = context.WithTimeout(context.Background(), roundInterval)
+		go func() {
+			select {
+			case <-ctx.Done():
+			case signal := <-interruptCh:
+				log.Info(" ⚠️ abort due to interruption", "when", "roundInterval", "reason", signalToErr(signal))
+				cancel()
+			}
+		}()
+		// actually stuck here
+		<-ctx.Done()
+		if errors.Is(ctx.Err(), context.Canceled) {
+			// abort the whole process if the block is interrupted
+			return
 		}
 	}
 	// get the most profitable work
 	bestWork := pickTheMostProfitableWork(workList)
 	_ = w.commit(bestWork.work, w.fullTaskHook, true, start)
 
-	//if p, ok := w.engine.(*parlia.Parlia); ok {
-	//	go pReporter.Done(bestWork.round, blockNumber, bestWork.income, w.sendMessage, p.MakeTextSigner())
-	//}
+	if p, ok := w.engine.(*parlia.Parlia); ok {
+		go pReporter.Done(bestWork.round, blockNumber, bestWork.income, w.sendMessage, p.MakeTextSigner())
+	}
 }
 
 func pickTheMostProfitableWork(workList []*multiPackingWork) *multiPackingWork {
@@ -235,26 +226,21 @@ func pickTheMostProfitableWork(workList []*multiPackingWork) *multiPackingWork {
 	return bestWork
 }
 
-func repackingInterval(fillElapsed time.Duration, headerTime uint64) time.Duration {
-	left := blockMiningTimeLeft(headerTime)
-	if left <= fillElapsed {
+func repackingInterval(fillElapsed time.Duration, timeLeft time.Duration) time.Duration {
+	if timeLeft <= fillElapsed {
 		return 0
 	}
-	f := int64(left) / int64(fillElapsed)
-	if f > 20 && left > 1000*time.Millisecond+fillElapsed {
+
+	if timeLeft > 1000*time.Millisecond+fillElapsed {
 		return 500 * time.Millisecond
-	} else if f > 10 && left > 500*time.Millisecond+fillElapsed {
+	} else if timeLeft > 500*time.Millisecond+fillElapsed {
 		return 200 * time.Millisecond
-	} else if f > 5 && left > 300*time.Millisecond+fillElapsed {
+	} else if timeLeft > 300*time.Millisecond+fillElapsed {
 		return 100 * time.Millisecond
-	} else if f > 1 && left > 20*time.Millisecond+fillElapsed {
+	} else if timeLeft > 20*time.Millisecond+fillElapsed {
 		return 20 * time.Millisecond
 	}
 	return 0
-}
-
-func blockMiningTimeLeft(headerTime uint64) time.Duration {
-	return time.Until(time.Unix(int64(headerTime), 0))
 }
 
 func (w *worker) sendMessage(text string, mute bool) {

@@ -5,13 +5,11 @@ import (
 	"errors"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/lru"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 	"math/big"
 	"strings"
-	"time"
 )
 
 type puissantRuntime struct {
@@ -29,18 +27,17 @@ type puissantRuntime struct {
 }
 
 func RunPuissantCommitter(
-	timeLeft time.Duration,
+	ctx context.Context,
+	interruptCh chan int32,
+	signalToErr func(int32) error,
+
 	workerEnv *MinerEnvironment,
 	pendingPool map[common.Address][]*types.Transaction,
 	puissantPool types.PuissantBundles,
 	chain *BlockChain,
 	chainConfig *params.ChainConfig,
 	poolRemoveFn func(mapset.Set[types.PuissantID]),
-
-	packedPuissantTxs *lru.Cache[common.Hash, struct{}],
-) ([]*CommitterReport, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeLeft)
-	defer cancel()
+) ([]*CommitterReport, bool, error) {
 
 	var committer = &puissantRuntime{
 		env:            workerEnv,
@@ -70,7 +67,13 @@ func RunPuissantCommitter(
 	for {
 		select {
 		case <-ctx.Done():
+			// timeout
 			return committer.finalStatistics(true)
+
+		case signal := <-interruptCh:
+			log.Info(" ⚠️ abort due to interruption", "when", "packingRunTime", "reason", signalToErr(signal))
+			return nil, true, signalToErr(signal)
+
 		default:
 		}
 
@@ -82,15 +85,6 @@ func RunPuissantCommitter(
 		tx := workerEnv.PuissantTxQueue.Peek()
 		if tx == nil {
 			return committer.finalStatistics(false)
-		}
-		if _, exist := packedPuissantTxs.Get(tx.Hash()); exist {
-			log.Warn(" 👮 tx already packed", "tx", tx.Hash())
-			if tx.IsPuissant() {
-				committer.failedGroup.Add(tx.PuissantID())
-				return nil, errors.New("👮 previous packed puissant included, abort this round")
-			}
-			workerEnv.PuissantTxQueue.Shift()
-			continue
 		}
 
 		committer.commitTransaction(tx)
@@ -106,7 +100,7 @@ type CommitterReport struct {
 	EvmRun     bool
 }
 
-func (p *puissantRuntime) finalStatistics(integrityCheck bool) ([]*CommitterReport, error) {
+func (p *puissantRuntime) finalStatistics(integrityCheck bool) ([]*CommitterReport, bool, error) {
 	if integrityCheck {
 		var unfinished = mapset.NewThreadUnsafeSet[types.PuissantID]()
 		for pid := range p.pTxsStatuses {
@@ -116,7 +110,7 @@ func (p *puissantRuntime) finalStatistics(integrityCheck bool) ([]*CommitterRepo
 		}
 		for _, tx := range p.env.PackedTxs {
 			if unfinished.Contains(tx.PuissantID()) {
-				return nil, errors.New("unfinished puissant included")
+				return nil, false, errors.New("unfinished puissant included")
 			}
 		}
 	}
@@ -167,7 +161,7 @@ func (p *puissantRuntime) finalStatistics(integrityCheck bool) ([]*CommitterRepo
 		report[bSeq] = pRpt
 	}
 
-	return report, nil
+	return report, false, nil
 }
 
 func (p *puissantRuntime) commitTransaction(tx *types.Transaction) {
