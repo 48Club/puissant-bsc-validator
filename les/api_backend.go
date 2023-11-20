@@ -19,6 +19,7 @@ package les
 import (
 	"context"
 	"errors"
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"math/big"
 	"time"
@@ -351,6 +352,6 @@ func (b *LesApiBackend) StateAtTransaction(ctx context.Context, block *types.Blo
 	return b.eth.stateAtTransaction(ctx, block, txIndex, reexec)
 }
 
-func (b *LesApiBackend) SendPuissant(ctx context.Context, pid types.PuissantID, txs types.Transactions, maxTimestamp uint64, relaySignature hexutil.Bytes) error {
+func (b *LesApiBackend) SendPuissant(ctx context.Context, pid types.PuissantID, txs types.Transactions, revertible mapset.Set[common.Hash], maxTimestamp uint64, relaySignature hexutil.Bytes) error {
 	return nil
 }

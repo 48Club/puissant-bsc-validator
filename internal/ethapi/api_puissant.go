@@ -48,16 +48,16 @@ func (s *PuissantAPI) SendPuissant(ctx context.Context, args SendPuissantArgs) e
 	}
 
 	var (
-		txs           types.Transactions                         // final puissant-package transactions
-		tmpGasPrice   *big.Int                                   // tmp gas price for txs-sort-check, txs must be sorted by gas price descending
-		txHash        = mapset.NewThreadUnsafeSet[common.Hash]() // tx hash set for duplicate check
-		revertibleSet = mapset.NewThreadUnsafeSet[common.Hash]() // revertible tx hash set for marking revertible
+		txs         types.Transactions                         // final puissant-package transactions
+		tmpGasPrice *big.Int                                   // tmp gas price for txs-sort-check, txs must be sorted by gas price descending
+		txHash      = mapset.NewThreadUnsafeSet[common.Hash]() // tx hash set for duplicate check
+		revertible  = mapset.NewSet[common.Hash]()             // revertible tx hash set for marking revertible
 	)
 	for _, each := range args.Revertible {
-		revertibleSet.Add(each)
+		revertible.Add(each)
 	}
 
-	for index, encodedTx := range args.Txs {
+	for _, encodedTx := range args.Txs {
 		tx := new(types.Transaction)
 		if err := tx.UnmarshalBinary(encodedTx); err != nil {
 			return err
@@ -75,11 +75,6 @@ func (s *PuissantAPI) SendPuissant(ctx context.Context, args SendPuissantArgs) e
 		}
 		txHash.Add(tx.Hash())
 
-		// mark tx seq and revertible for puissant-package
-		tx.SetPuissantTxSeq(index)
-		if revertibleSet.Contains(tx.Hash()) {
-			tx.SetPuissantAcceptReverting()
-		}
 		txs = append(txs, tx)
 	}
 	// check duplicate transaction in txs
@@ -87,10 +82,6 @@ func (s *PuissantAPI) SendPuissant(ctx context.Context, args SendPuissantArgs) e
 		return errors.New("duplicate transaction found")
 	}
 
-	bundlePID := types.GenPuissantID(txs, revertibleSet, args.MaxTimestamp)
-	for _, tx := range txs {
-		tx.SetPuissantID(bundlePID)
-	}
-
-	return s.b.SendPuissant(ctx, bundlePID, txs, args.MaxTimestamp, args.RelaySignature)
+	bundlePID := types.GenPuissantID(txs, revertible, args.MaxTimestamp)
+	return s.b.SendPuissant(ctx, bundlePID, txs, revertible, args.MaxTimestamp, args.RelaySignature)
 }

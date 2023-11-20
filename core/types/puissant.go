@@ -1,31 +1,110 @@
 package types
 
 import (
-	"fmt"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/log"
 	"math/big"
 	"sort"
 )
 
 type PuissantBundle struct {
-	id       PuissantID
-	txs      Transactions
-	expireAt uint64
-	bidPrice *big.Int // gas price of the first transaction
+	id         PuissantID
+	txs        Transactions
+	expireAt   uint64
+	revertible mapset.Set[common.Hash]
+	bidPrice   *big.Int // gas price of the first transaction
+
+	lastTriedBlock uint64
+
+	status map[int]*PuiBundleStatus
 }
 
-func NewPuissantBundle(pid PuissantID, txs Transactions, maxTS uint64) *PuissantBundle {
+func NewPuissantBundle(pid PuissantID, txs Transactions, revertible mapset.Set[common.Hash], maxTS uint64) *PuissantBundle {
 	if txs.Len() == 0 {
 		panic("empty bundle")
 	}
-	return &PuissantBundle{
-		id:       pid,
-		txs:      txs,
-		expireAt: maxTS,
-		bidPrice: txs[0].GasTipCap(),
+	theBundle := &PuissantBundle{
+		id:         pid,
+		txs:        txs,
+		expireAt:   maxTS,
+		revertible: revertible,
+		bidPrice:   txs[0].GasTipCap(),
 	}
+	for index, tx := range txs {
+		tx.SetBundle(theBundle, index)
+	}
+	return theBundle
+}
+
+func (pp *PuissantBundle) PreparePacking(blockNumber uint64, round int) {
+	if blockNumber != pp.lastTriedBlock {
+		pp.status = make(map[int]*PuiBundleStatus)
+		pp.lastTriedBlock = blockNumber
+	}
+	var txs = make([]*PuiTransactionStatus, len(pp.txs))
+	for index := range pp.txs {
+		txs[index] = &PuiTransactionStatus{Hash: pp.txs[index].Hash()}
+	}
+	pp.status[round] = &PuiBundleStatus{Fee: new(big.Int), Txs: txs}
+}
+
+func (pp *PuissantBundle) UpdateTransactionStatus(round int, hash common.Hash, gasUsed uint64, status PuiTransactionStatusCode, err error) {
+	bundle := pp.status[round]
+
+	for i, tx := range pp.txs {
+		if tx.Hash() == hash {
+			bundle.Txs[i].Status = status
+			bundle.Txs[i].GasUsed = gasUsed
+			bundle.Txs[i].Error = err
+			break
+		}
+	}
+}
+
+func (pp *PuissantBundle) RoundStatus(round int) *PuiBundleStatus {
+	return pp.status[round]
+}
+
+func (pp *PuissantBundle) IsPosted(round int) bool {
+	bundle := pp.status[round]
+
+	for _, tx := range bundle.Txs {
+		if tx.Status != PuiTransactionStatusOk {
+			return false
+		}
+	}
+	return true
+}
+
+func (pp *PuissantBundle) FinalizeRound(round int) (*PuiBundleStatus, bool) {
+	bStatus := pp.RoundStatus(round)
+	if bStatus == nil {
+		return nil, false
+	}
+	if bStatus.Status != PuiBundleStatusNoRun {
+		return bStatus, bStatus.Status == PuiBundleStatusOK
+	}
+
+	var failed bool
+	for index := pp.txs.Len() - 1; index >= 0; index-- {
+		if txStatus := bStatus.Txs[index].Status; txStatus.IsFailed() {
+			failed = true
+			if uint8(txStatus) > uint8(bStatus.Status) {
+				bStatus.Status = PuiBundleStatusCode(txStatus)
+				bStatus.Error = pp.txs[index].Errorf(bStatus.Txs[index].Error)
+			}
+		}
+	}
+	if !failed {
+		bStatus.Status = PuiBundleStatusOK
+		bStatus.Fee = new(big.Int).Mul(pp.txs[0].GasTipCap(), new(big.Int).SetUint64(bStatus.Txs[0].GasUsed))
+	}
+
+	return bStatus, !failed
+}
+
+func (pp *PuissantBundle) Revertible(hash common.Hash) bool {
+	return pp.revertible.Contains(hash)
 }
 
 func (pp *PuissantBundle) ID() PuissantID {
@@ -78,26 +157,32 @@ func (p PuissantBundles) Swap(i, j int) {
 	p[i], p[j] = p[j], p[i]
 }
 
+func (p PuissantBundles) PreparePacking(blockNumber uint64, round int) {
+	for _, bundle := range p {
+		bundle.PreparePacking(blockNumber, round)
+	}
+}
+
+func (p PuissantBundles) IsEmpty() bool {
+	return len(p) == 0
+}
+
 // transactions queue
 type puissantTxQueue Transactions
 
 func (s puissantTxQueue) Len() int { return len(s) }
 func (s puissantTxQueue) Less(i, j int) bool {
-
 	bundleSort := func(txI, txJ *Transaction) bool {
-		_, txIBSeq, txIInnerSeq := txI.PuissantInfo()
-		_, txJBSeq, txJInnerSeq := txJ.PuissantInfo()
-
-		if txIBSeq == txJBSeq {
-			return txIInnerSeq < txJInnerSeq
+		if txI.bundle.ID() == txJ.bundle.ID() {
+			return txI.bundleTxIndex < txJ.bundleTxIndex
 		}
-		return txIBSeq < txJBSeq
+		return txI.bundle.HasHigherBidPriceThan(txJ.bundle)
 	}
 
 	cmp := s[i].GasTipCap().Cmp(s[j].GasTipCap())
 	if cmp == 0 {
-		iIsBundle := s[i].IsPuissant()
-		jIsBundle := s[j].IsPuissant()
+		iIsBundle := s[i].bundle != nil
+		jIsBundle := s[j].bundle != nil
 
 		if !iIsBundle && !jIsBundle {
 			return s[i].Time().Before(s[j].Time())
@@ -173,21 +258,12 @@ func (t *TransactionsPuissant) Copy() *TransactionsPuissant {
 	return &TransactionsPuissant{txHeadsAndPuissant: newHeadsAndBundleTxs, txs: txs, signer: t.signer, enabled: t.enabled.Clone()}
 }
 
-func (t *TransactionsPuissant) LogPuissantTxs() {
-	for _, tx := range t.txHeadsAndPuissant {
-		if tx.IsPuissant() {
-			_, pSeq, bInnerSeq := tx.PuissantInfo()
-			log.Info("puissant-tx", "seq", fmt.Sprintf("%2d - %d", pSeq, bInnerSeq), "hash", tx.Hash(), "revert", tx.AcceptsReverting(), "gp", tx.GasTipCap().Uint64())
-		}
-	}
-}
-
 func (t *TransactionsPuissant) Peek() *Transaction {
 	if len(t.txHeadsAndPuissant) == 0 {
 		return nil
 	}
 	next := t.txHeadsAndPuissant[0]
-	if pid := next.PuissantID(); pid.IsPuissant() && !t.enabled.Contains(pid) {
+	if next.bundle != nil && !t.enabled.Contains(next.bundle.ID()) {
 		t.Pop()
 		return t.Peek()
 	}
@@ -196,7 +272,7 @@ func (t *TransactionsPuissant) Peek() *Transaction {
 
 func (t *TransactionsPuissant) Shift() {
 	acc, _ := Sender(t.signer, t.txHeadsAndPuissant[0])
-	if !t.txHeadsAndPuissant[0].IsPuissant() {
+	if t.txHeadsAndPuissant[0].bundle == nil {
 		if txs, ok := t.txs[acc]; ok && len(txs) > 0 {
 			t.txHeadsAndPuissant[0], t.txs[acc] = txs[0], txs[1:]
 			sort.Sort(&t.txHeadsAndPuissant)

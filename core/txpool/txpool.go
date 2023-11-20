@@ -449,9 +449,9 @@ func (p *TxPool) Status(hash common.Hash) TxStatus {
 	return TxStatusUnknown
 }
 
-func (p *TxPool) AddPuissantBundle(pid types.PuissantID, txs types.Transactions, maxTimestamp uint64, relaySignature hexutil.Bytes) error {
+func (p *TxPool) AddPuissantBundle(pid types.PuissantID, txs types.Transactions, revertible mapset.Set[common.Hash], maxTimestamp uint64, relaySignature hexutil.Bytes) error {
 	if p.puissantPool != nil {
-		return p.puissantPool.AddPuissantBundle(pid, txs, maxTimestamp, relaySignature)
+		return p.puissantPool.AddPuissantBundle(pid, txs, revertible, maxTimestamp, relaySignature)
 	}
 	return errors.New("puissant is not enabled")
 }

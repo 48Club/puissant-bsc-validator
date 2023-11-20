@@ -59,10 +59,12 @@ type Transaction struct {
 	from atomic.Value
 
 	// 48club modified
-	puissantID      PuissantID
-	puissantSeq     int
-	puissantTxSeq   int
-	acceptReverting bool
+	bundle        *PuissantBundle
+	bundleTxIndex int
+	//puissantID      PuissantID
+	//puissantSeq     int
+	//puissantTxSeq   int
+	//acceptReverting bool
 }
 
 // NewTx creates a new transaction.
@@ -105,37 +107,46 @@ type TxData interface {
 	effectiveGasPrice(dst *big.Int, baseFee *big.Int) *big.Int
 }
 
-func (tx *Transaction) PuissantInfo() (PuissantID, int, int) {
-	return tx.puissantID, tx.puissantSeq, tx.puissantTxSeq
+func (tx *Transaction) SetBundle(b *PuissantBundle, txIndex int) {
+	tx.bundle = b
+	tx.bundleTxIndex = txIndex
 }
 
-func (tx *Transaction) IsPuissant() bool {
-	return tx.puissantID.IsPuissant()
+func (tx *Transaction) Bundle() (*PuissantBundle, int) {
+	return tx.bundle, tx.bundleTxIndex
 }
 
-func (tx *Transaction) PuissantID() PuissantID {
-	return tx.puissantID
-}
-
-func (tx *Transaction) AcceptsReverting() bool {
-	return tx.acceptReverting
-}
-
-func (tx *Transaction) SetPuissantTxSeq(txSeq int) {
-	tx.puissantTxSeq = txSeq
-}
-
-func (tx *Transaction) SetPuissantAcceptReverting() {
-	tx.acceptReverting = true
-}
-
-func (tx *Transaction) SetPuissantID(id PuissantID) {
-	tx.puissantID = id
-}
-
-func (tx *Transaction) SetPuissantSeq(seq int) {
-	tx.puissantSeq = seq
-}
+//func (tx *Transaction) PuissantInfo() (PuissantID, int, int) {
+//	return tx.puissantID, tx.puissantSeq, tx.puissantTxSeq
+//}
+//
+//func (tx *Transaction) IsPuissant() bool {
+//	return tx.puissantID.IsPuissant()
+//}
+//
+//func (tx *Transaction) PuissantID() PuissantID {
+//	return tx.puissantID
+//}
+//
+//func (tx *Transaction) AcceptsReverting() bool {
+//	return tx.acceptReverting
+//}
+//
+//func (tx *Transaction) SetPuissantTxSeq(txSeq int) {
+//	tx.puissantTxSeq = txSeq
+//}
+//
+//func (tx *Transaction) SetPuissantAcceptReverting() {
+//	tx.acceptReverting = true
+//}
+//
+//func (tx *Transaction) SetPuissantID(id PuissantID) {
+//	tx.puissantID = id
+//}
+//
+//func (tx *Transaction) SetPuissantSeq(seq int) {
+//	tx.puissantSeq = seq
+//}
 
 // EncodeRLP implements rlp.Encoder
 func (tx *Transaction) EncodeRLP(w io.Writer) error {
@@ -472,10 +483,9 @@ func (tx *Transaction) Hash() common.Hash {
 }
 
 // Errorf returns a new error with the given formatted string.
-func (tx *Transaction) Errorf(e string) error {
+func (tx *Transaction) Errorf(e error) error {
 	txString := tx.Hash().Hex()
-	hash := txString[:5] + "..." + txString[len(txString)-3:]
-	return fmt.Errorf("%s: %s", hash, e)
+	return fmt.Errorf("%s...%s: %v", txString[:5], txString[len(txString)-3:], e)
 }
 
 // Size returns the true encoded storage size of the transaction, either by encoding

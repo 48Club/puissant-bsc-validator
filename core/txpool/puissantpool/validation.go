@@ -127,7 +127,7 @@ func (pool *PuissantPool) validatePuissantTxs(txs types.Transactions) error {
 			return fmt.Errorf("invalid payment tx nonce, have %d, want %d", tx.Nonce(), validNonce)
 
 		} else if validNonce > tx.Nonce() {
-			return core.ErrNonceTooLow
+			return tx.Errorf(core.ErrNonceTooLow)
 		}
 
 		if index == 0 && pool.currentState.GetBalance(from).Cmp(tx.Cost()) < 0 {

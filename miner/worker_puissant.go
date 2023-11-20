@@ -77,7 +77,7 @@ func (w *worker) commitWork(interruptCh chan int32, timestamp int64) {
 	var (
 		coinbase    common.Address
 		workList    = make([]*multiPackingWork, 0, 20)
-		pReporter   = core.NewPuissantReporter()
+		pReporter   = core.NewPuissantReporter(w.config.ReportURL)
 		blockNumber uint64
 	)
 	if w.isRunning() {
@@ -121,11 +121,11 @@ LOOP:
 
 			isInturn = work.Header.Difficulty.Cmp(diffInTurn) == 0
 
-			pendingTxs      map[common.Address][]*txpool.LazyTransaction
-			pendingPuissant types.PuissantBundles
+			pendingTxs     map[common.Address][]*txpool.LazyTransaction
+			pendingBundles types.PuissantBundles
 		)
 		if isInturn {
-			pendingTxs, pendingPuissant = w.eth.TxPool().PendingTxsAndPuissant(false, work.Header.Time)
+			pendingTxs, pendingBundles = w.eth.TxPool().PendingTxsAndPuissant(false, work.Header.Time)
 		} else {
 			pendingTxs = w.eth.TxPool().Pending(false)
 		}
@@ -137,14 +137,15 @@ LOOP:
 			}
 		}
 
-		report, abort, err := core.RunPuissantCommitter(
+		abort, err := core.RunPuissantCommitter(
 			ctx,
+			round,
 			interruptCh,
 			signalToErr,
 
 			work,
 			pendingPubPool,
-			pendingPuissant,
+			pendingBundles,
 			w.chain,
 			w.chainConfig,
 			w.eth.TxPool().DeletePuissantBundles,
@@ -156,7 +157,7 @@ LOOP:
 
 		thisRound.err = err
 		thisRound.income = work.State.GetBalance(consensus.SystemAddress)
-		pReporter.Update(report, round)
+		pReporter.FinalizeRound(round, pendingBundles)
 
 		roundElapsed := time.Since(roundStart)
 
@@ -167,17 +168,28 @@ LOOP:
 
 		roundInterval := repackingInterval(roundElapsed, *timeLeft)
 
-		log.Info("tried packing",
-			"block", blockNumber,
-			"round", round,
-			"txs", work.PackedTxs.Len(),
-			"bundles", len(report),
-			"income", types.WeiToEther(thisRound.income),
-			"elapsed", common.PrettyDuration(roundElapsed),
-			"timeLeft", common.PrettyDuration(*timeLeft),
-			"interval", common.PrettyDuration(roundInterval),
-			"err", thisRound.err,
-		)
+		if isInturn {
+			log.Info("inturn packing",
+				"block", blockNumber,
+				"round", round,
+				"txs", work.PackedTxs.Len(),
+				"bundles", len(pendingBundles),
+				"income", types.WeiToEther(thisRound.income),
+				"elapsed", common.PrettyDuration(roundElapsed),
+				"timeLeft", common.PrettyDuration(*timeLeft),
+				"interval", common.PrettyDuration(roundInterval),
+				"err", thisRound.err,
+			)
+		} else {
+			log.Info("backup packing",
+				"block", blockNumber,
+				"round", round,
+				"txs", work.PackedTxs.Len(),
+				"income", types.WeiToEther(thisRound.income),
+				"elapsed", common.PrettyDuration(roundElapsed),
+				"timeLeft", common.PrettyDuration(*timeLeft),
+			)
+		}
 
 		if roundInterval <= 0 {
 			// no time for another round, commit now
@@ -190,7 +202,7 @@ LOOP:
 			select {
 			case <-ctx.Done():
 			case signal := <-interruptCh:
-				log.Info(" ⚠️ abort due to interruption", "when", "roundInterval", "reason", signalToErr(signal))
+				log.Info("packing abort due to interruption", "when", "roundInterval", "reason", signalToErr(signal))
 				cancel()
 			}
 		}()
@@ -206,7 +218,12 @@ LOOP:
 	_ = w.commit(bestWork.work, w.fullTaskHook, true, start)
 
 	if p, ok := w.engine.(*parlia.Parlia); ok {
-		go pReporter.Done(bestWork.round, blockNumber, bestWork.income, w.sendMessage, p.MakeTextSigner())
+		go func() {
+			tgMsg := pReporter.Finalize(blockNumber, bestWork.round, bestWork.income, p.MakeTextSigner())
+			if len(tgMsg) > 0 {
+				w.sendMessage(tgMsg, true)
+			}
+		}()
 	}
 }
 

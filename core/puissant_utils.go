@@ -5,39 +5,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/params"
-	"math/big"
-	"strconv"
 )
-
-type ptxCommitStatus struct {
-	hash      common.Hash
-	gasPrice  *big.Int
-	gasUsed   uint64
-	gasLimit  uint64
-	hasData   bool
-	error     error
-	status    puissantTxStatusCode
-	revertMsg string
-
-	uniqueID string
-}
-
-func initPTxCommitStatus(tx *types.Transaction, signer types.Signer) *ptxCommitStatus {
-	sender, _ := types.Sender(signer, tx)
-
-	return &ptxCommitStatus{
-		hash:      tx.Hash(),
-		gasPrice:  tx.GasPrice(),
-		gasLimit:  tx.Gas(),
-		hasData:   len(tx.Data()) > 4,
-		error:     types.PuiErrTxNoRun,
-		status:    PuissantTransactionStatusNoRun,
-		gasUsed:   0,
-		revertMsg: "",
-
-		uniqueID: sender.Hex() + strconv.FormatUint(tx.Nonce(), 10),
-	}
-}
 
 func commitTransaction(tx *types.Transaction, chain *BlockChain, chainConfig *params.ChainConfig, coinbase common.Address, envState *state.StateDB, envGasPool *GasPool, envHeader *types.Header, revertIfFailed, gasReq21000 bool, receiptProcessors ...ReceiptProcessor) (*types.Receipt, error) {
 	snap := envState.Snapshot()

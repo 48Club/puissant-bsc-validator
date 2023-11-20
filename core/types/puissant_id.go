@@ -2,24 +2,11 @@ package types
 
 import (
 	"bytes"
-	"errors"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/google/uuid"
 	"math"
-)
-
-const (
-	PaymentGasUsageBaseLine  = 21000
-	PuissantStatusReportURL  = "https://explorer.48.club/api/v1/puissant_update"
-	PuissantReportExpiredURL = ""
-)
-
-var (
-	PuiErrInvalidPayment = errors.New("puiErr: invalid payment")
-	PuiErrTxNoRun        = errors.New("puiErr: tx no run")
-	PuiErrTxConflict     = errors.New("puiErr: conflict")
 )
 
 type PuissantID [16]byte

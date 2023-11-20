@@ -13,229 +13,206 @@ import (
 	"math/big"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 )
 
-type puissantStatusCode uint8
-type puissantInfoCode uint8
-type puissantTxStatusCode uint8
+type PuissantReporter struct {
+	bundleRecords map[int]types.PuissantBundles
+	evmTried      mapset.Set[types.PuissantID]
+	loaded        mapset.Set[types.PuissantID]
+	maxRound      int
 
-type tUploadData struct {
-	BlockNumber string             `json:"block"`
-	Result      []*tUploadPuissant `json:"result"`
+	client    *http.Client
+	reportURL string
 }
 
-type tUploadPuissant struct {
-	UUID   string                `json:"uuid"`
-	Status puissantStatusCode    `json:"status"`
-	Info   puissantInfoCode      `json:"info"`
-	Txs    []*tUploadTransaction `json:"txs"`
-}
+func NewPuissantReporter(reportURL string) *PuissantReporter {
+	return &PuissantReporter{
+		bundleRecords: make(map[int]types.PuissantBundles),
+		evmTried:      mapset.NewThreadUnsafeSet[types.PuissantID](),
+		loaded:        mapset.NewThreadUnsafeSet[types.PuissantID](),
 
-type tUploadTransaction struct {
-	TxHash    string               `json:"tx_hash"`
-	GasUsed   uint64               `json:"gas_used"`
-	Status    puissantTxStatusCode `json:"status"`
-	RevertMsg string               `json:"revert_msg"`
-}
-
-const (
-	PuissantStatusWellDone puissantStatusCode = 0
-	PuissantStatusPending  puissantStatusCode = 1
-	PuissantStatusDropped  puissantStatusCode = 2
-
-	PuissantInfoCodeOk             puissantInfoCode = 0
-	PuissantInfoCodeExpired        puissantInfoCode = 1
-	PuissantInfoCodeInvalidPayment puissantInfoCode = 2
-	PuissantInfoCodeRevert         puissantInfoCode = 3
-	PuissantInfoCodeBeaten         puissantInfoCode = 4
-
-	PuissantTransactionStatusOk               puissantTxStatusCode = 0
-	PuissantTransactionStatusRevert           puissantTxStatusCode = 1
-	PuissantTransactionStatusPreCheckFailed   puissantTxStatusCode = 2
-	PuissantTransactionStatusConflictedBeaten puissantTxStatusCode = 3
-	PuissantTransactionStatusNoRun            puissantTxStatusCode = 4
-	PuissantTransactionStatusInvalidPayment   puissantTxStatusCode = 5
-)
-
-func (code puissantStatusCode) ToIcon() string {
-	switch code {
-	case PuissantStatusWellDone:
-		return "✅"
-	case PuissantStatusDropped:
-		return "❌"
-	default:
-		return "❓"
+		client:    &http.Client{Timeout: 5 * time.Second},
+		reportURL: reportURL,
 	}
 }
 
-func (code puissantTxStatusCode) ToString() string {
-	switch code {
-	case PuissantTransactionStatusOk:
-		return "OK"
-	case PuissantTransactionStatusRevert:
-		return "Reverted"
-	case PuissantTransactionStatusConflictedBeaten:
-		return "Conflicted"
-	case PuissantTransactionStatusNoRun:
-		return "NoRun"
-	case PuissantTransactionStatusInvalidPayment:
-		return "InvalidPayment"
-	case PuissantTransactionStatusPreCheckFailed:
-		return "PreCheckFailed"
-	default:
-		return "Unknown"
-	}
-}
+func (pr *PuissantReporter) FinalizeRound(round int, finishedBundles types.PuissantBundles) {
+	pr.bundleRecords[round] = finishedBundles
+	pr.maxRound = round
 
-type CommitterReportList []*CommitterReport
-
-func (p CommitterReportList) Len() int {
-	return len(p)
-}
-
-func (p CommitterReportList) Less(i, j int) bool {
-	return p[i].Txs[0].gasPrice.Cmp(p[j].Txs[0].gasPrice) > 0
-}
-
-func (p CommitterReportList) Swap(i, j int) {
-	p[i], p[j] = p[j], p[i]
-}
-
-type puissantReporter struct {
-	data     map[int]CommitterReportList
-	evmTried mapset.Set[types.PuissantID]
-	loaded   mapset.Set[types.PuissantID]
-
-	client *http.Client
-}
-
-func NewPuissantReporter() *puissantReporter {
-	return &puissantReporter{
-		data:     make(map[int]CommitterReportList),
-		evmTried: mapset.NewThreadUnsafeSet[types.PuissantID](),
-		loaded:   mapset.NewThreadUnsafeSet[types.PuissantID](),
-
-		client: &http.Client{Timeout: 5 * time.Second},
-	}
-}
-
-func (pr *puissantReporter) Update(newGroup CommitterReportList, round int) {
-	if newGroup == nil {
-		return
-	}
-
-	pr.data[round] = newGroup
-
-	for _, update := range newGroup {
-		if update.EvmRun {
-			pr.evmTried.Add(update.PuissantID)
+	for _, bundle := range finishedBundles {
+		if bundle.RoundStatus(round).Txs[0].Status != types.PuiTransactionStatusNoRun {
+			pr.evmTried.Add(bundle.ID())
 		}
-		pr.loaded.Add(update.PuissantID)
+		pr.loaded.Add(bundle.ID())
 	}
 }
 
-func (pr *puissantReporter) Done(bestRound int, blockNumber uint64, blockIncome *big.Int, senderFn func(text string, mute bool), msgSigner func(text []byte) []byte) (ret []common.Hash) {
-
+func (pr *PuissantReporter) Finalize(blockNumber uint64, bestRound int, blockIncome *big.Int, msgSigner func(text []byte) []byte) string {
 	if pr.loaded.Cardinality() == 0 {
-		return nil
+		return ""
 	}
 
 	var (
-		start        = time.Now()
-		success      int
-		puiIncomeF   float64
-		incomeS      string
-		blockIncomeF = types.WeiToEther(blockIncome)
-		text         = fmt.Sprintf("[%d](https://bscscan.com/block/%d)\n\n", blockNumber, blockNumber)
+		telegram = buildTelegramReporter(blockNumber)
+
+		resultOK     = make(map[types.PuissantID]*types.PuiBundleStatus)
+		resultFailed = make(map[types.PuissantID]*types.PuiBundleStatus)
 	)
-	puissantList, ok := pr.data[bestRound]
-	if !ok {
-		return nil
+
+	// first, add all success bundles from bestRound
+	for _, bundle := range pr.bundleRecords[bestRound] {
+		if bundleRound, ok := bundle.FinalizeRound(bestRound); ok {
+			resultOK[bundle.ID()] = bundleRound
+			telegram.Add(bundle, bundleRound)
+		}
 	}
 
-	for index, each := range puissantList {
-		if each.Status == PuissantStatusWellDone {
+	// then, add all failed bundle from all rounds
+	for round := 0; round < pr.maxRound; round++ {
+		roundRecords, ok := pr.bundleRecords[round]
+		if !ok {
 			continue
 		}
 
-		incomeF := types.WeiToEther(each.Income)
-		text += fmt.Sprintf("*Rank: %d, %.3fbnb*\n", index+1, incomeF)
-		for txSeq, tx := range each.Txs {
-			if txSeq == 0 {
-				text += fmt.Sprintf(" [TX-%d](%s): used=%d, *%dgw*\n", txSeq+1, "https://bscscan.com/tx/"+tx.hash.Hex(), tx.gasUsed, new(big.Int).Div(tx.gasPrice, big.NewInt(params.GWei)).Uint64())
-			} else {
-				text += fmt.Sprintf(" [TX-%d](%s): used=%d\n", txSeq+1, "https://bscscan.com/tx/"+tx.hash.Hex(), tx.gasUsed)
+		for _, bundle := range roundRecords {
+			if _, exist := resultOK[bundle.ID()]; exist {
+				continue
 			}
-			ret = append(ret, tx.hash)
+			bundleRound, success := bundle.FinalizeRound(round)
+			if success {
+				continue
+			}
+			resultFailed[bundle.ID()] = bundleRound
 		}
-		success++
-		puiIncomeF += incomeF
-		text += "\n"
 	}
 
-	if puiIncomeF > 0 && blockIncomeF > 0 {
-		incomeS = fmt.Sprintf("%.3f/%.3f (%d%%)", puiIncomeF, blockIncomeF, int(puiIncomeF*100/blockIncomeF))
-	} else {
-		incomeS = fmt.Sprintf("%.3f", blockIncomeF)
+	if len(pr.reportURL) > 0 {
+		go pr.reportToAPI(resultOK, resultFailed, blockNumber, msgSigner)
 	}
-	text += fmt.Sprintf("*⏱️round: %d (%d)*\n*🧾puissant: %d / %d / %d*\n*💰income: %s*\n", bestRound+1, len(pr.data)+1, success, pr.evmTried.Cardinality(), pr.loaded.Cardinality(), incomeS)
 
-	senderFn(text, true)
-	if msgSigner != nil {
-		pr.send(start, bestRound, blockNumber, msgSigner)
-	}
-	return ret
+	return telegram.Finish(blockIncome, bestRound, pr.maxRound, pr.evmTried.Cardinality(), pr.loaded.Cardinality())
 }
 
-func (pr *puissantReporter) send(start time.Time, bestRound int, blockNumber uint64, msgSigner func(text []byte) []byte) {
-	if len(pr.data) == 0 {
-		return
-	}
+func (pr *PuissantReporter) reportToAPI(resultOK, resultFailed map[types.PuissantID]*types.PuiBundleStatus, blockNumber uint64, msgSigner func(text []byte) []byte) {
 	var (
-		body = tUploadData{BlockNumber: hexutil.EncodeUint64(blockNumber)}
-		tmp  = make(map[types.PuissantID]*tUploadPuissant)
+		start = time.Now()
+		data  = make([]tUploadBundleResult, 0, len(resultOK)+len(resultFailed))
 	)
 
-	for round := 0; round <= bestRound; round++ {
-		if roundData, ok := pr.data[round]; ok {
-			for _, detail := range roundData {
-				if round == bestRound || detail.Status != PuissantStatusWellDone {
-					each := &tUploadPuissant{UUID: detail.PuissantID.Hex(), Status: detail.Status, Info: detail.Info, Txs: make([]*tUploadTransaction, len(detail.Txs))}
-					for txSeq, tx := range detail.Txs {
-						each.Txs[txSeq] = &tUploadTransaction{
-							TxHash:    tx.hash.Hex(),
-							GasUsed:   tx.gasUsed,
-							Status:    tx.status,
-							RevertMsg: tx.revertMsg,
-						}
-					}
-					tmp[detail.PuissantID] = each
-				}
+	errToStr := func(err error) string {
+		if err == nil {
+			return ""
+		}
+		return err.Error()
+	}
+
+	resultAddUp := func(result map[types.PuissantID]*types.PuiBundleStatus) {
+		for pid, bundle := range result {
+			each := tUploadBundleResult{
+				PuissantID: pid.Hex(),
+				Status:     bundle.Status,
+				ErrMsg:     errToStr(bundle.Error),
+				Txs:        make([]*tUploadTransactionResult, 0, len(bundle.Txs)),
 			}
+			for _, tx := range bundle.Txs {
+				each.Txs = append(each.Txs, &tUploadTransactionResult{
+					TxHash:  tx.Hash.Hex(),
+					GasUsed: tx.GasUsed,
+					Status:  tx.Status,
+					ErrMsg:  errToStr(tx.Error),
+				})
+			}
+			data = append(data, each)
 		}
 	}
-	for _, detail := range tmp {
-		body.Result = append(body.Result, detail)
-	}
 
-	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
-	b, _ := json.Marshal(body)
+	resultAddUp(resultOK)
+	resultAddUp(resultFailed)
 
-	req, err := http.NewRequest(http.MethodPost, types.PuissantStatusReportURL, bytes.NewBuffer(b))
+	b, _ := json.Marshal(data)
+
+	req, err := http.NewRequest(http.MethodPost, pr.reportURL, bytes.NewBuffer(b))
 	if err != nil {
 		panic(err)
 	}
 
+	bnStr := strconv.FormatUint(blockNumber, 10)
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("timestamp", timestamp)
-	req.Header.Set("sign", hexutil.Encode(msgSigner([]byte(timestamp))))
+	req.Header.Set("blockNumber", bnStr)
+	req.Header.Set("sign", hexutil.Encode(msgSigner([]byte(bnStr))))
 
 	resp, err := pr.client.Do(req)
 	if err != nil {
-		log.Error("❌ report packing result failed", "err", err, "elapsed", time.Since(start))
-	} else if resp.StatusCode != http.StatusOK {
-		log.Error("❌ report packing result failed", "StatusCode", resp.StatusCode, "elapsed", time.Since(start))
+		log.Error("report puissant block failed", "err", err, "elapsed", time.Since(start))
+	} else {
+		_ = resp.Body.Close()
 	}
-	_ = resp.Body.Close()
+}
+
+type tUploadBundleResult struct {
+	PuissantID string                      `json:"pid"`
+	Status     types.PuiBundleStatusCode   `json:"status"`
+	ErrMsg     string                      `json:"err"`
+	Txs        []*tUploadTransactionResult `json:"txs"`
+}
+
+type tUploadTransactionResult struct {
+	TxHash  string                         `json:"hash"`
+	GasUsed uint64                         `json:"gas"`
+	ErrMsg  string                         `json:"err"`
+	Status  types.PuiTransactionStatusCode `json:"status"`
+}
+
+type PuissantTelegramReporter struct {
+	content   strings.Builder
+	success   int
+	puiIncome *big.Int
+}
+
+func buildTelegramReporter(blockNumber uint64) *PuissantTelegramReporter {
+	tgr := &PuissantTelegramReporter{puiIncome: big.NewInt(0)}
+	tgr.content.WriteString(fmt.Sprintf("[%d](https://bscscan.com/block/%d)\n\n", blockNumber, blockNumber))
+	return tgr
+}
+
+func (ptg *PuissantTelegramReporter) Add(bundle *types.PuissantBundle, roundStatus *types.PuiBundleStatus) {
+	ptg.success++
+
+	ptg.content.WriteString(fmt.Sprintf("*Bundle %.3fbnb*\n", types.WeiToEther(roundStatus.Fee)))
+
+	for txSeq, tx := range bundle.Txs() {
+		if txSeq == 0 {
+			ptg.content.WriteString(fmt.Sprintf(" [TX-%d](%s): used=%d, *%dgw*\n", txSeq+1, "https://bscscan.com/tx/"+tx.Hash().Hex(), roundStatus.Txs[txSeq].GasUsed, new(big.Int).Div(tx.GasTipCap(), big.NewInt(params.GWei)).Uint64()))
+		} else {
+			ptg.content.WriteString(fmt.Sprintf(" [TX-%d](%s): used=%d\n", txSeq+1, "https://bscscan.com/tx/"+tx.Hash().Hex(), roundStatus.Txs[txSeq].GasUsed))
+		}
+	}
+	ptg.puiIncome.Add(ptg.puiIncome, roundStatus.Fee)
+	ptg.content.WriteString("\n")
+}
+
+func (ptg *PuissantTelegramReporter) Finish(blockIncome *big.Int, bestRound, totalRound, tried, total int) string {
+	blockIncomeF := types.WeiToEther(blockIncome)
+	puiIncomeF := types.WeiToEther(ptg.puiIncome)
+
+	var incomeStr string
+	if ptg.puiIncome.Cmp(common.Big0) > 0 && blockIncome.Cmp(common.Big0) > 0 {
+		incomeStr = fmt.Sprintf("%.3f/%.3f (%d%%)", puiIncomeF, blockIncomeF, int(puiIncomeF*100/blockIncomeF))
+	} else {
+		incomeStr = fmt.Sprintf("%.3f", blockIncomeF)
+	}
+	ptg.content.WriteString(fmt.Sprintf(
+		"*⏱️round: %d (%d)*\n*🧾puissant: %d / %d / %d*\n*💰income: %s*",
+		bestRound,
+		totalRound,
+		ptg.success,
+		tried,
+		total,
+		incomeStr,
+	))
+
+	return ptg.content.String()
 }

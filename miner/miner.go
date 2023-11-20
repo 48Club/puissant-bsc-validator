@@ -60,6 +60,7 @@ type Config struct {
 	NodeAlias       string
 	TelegramKey     string
 	TelegramGroupID int64
+	ReportURL       string
 }
 
 // DefaultConfig contains default settings for miner.
