@@ -17,13 +17,14 @@ import (
 	"time"
 )
 
+var defaultClient = &http.Client{Timeout: 5 * time.Second}
+
 type PuissantReporter struct {
 	bundleRecords map[int]types.PuissantBundles
 	evmTried      mapset.Set[types.PuissantID]
 	loaded        mapset.Set[types.PuissantID]
 	maxRound      int
 
-	client    *http.Client
 	reportURL string
 }
 
@@ -33,7 +34,6 @@ func NewPuissantReporter(reportURL string) *PuissantReporter {
 		evmTried:      mapset.NewThreadUnsafeSet[types.PuissantID](),
 		loaded:        mapset.NewThreadUnsafeSet[types.PuissantID](),
 
-		client:    &http.Client{Timeout: 5 * time.Second},
 		reportURL: reportURL,
 	}
 }
@@ -144,7 +144,7 @@ func (pr *PuissantReporter) reportToAPI(resultOK, resultFailed map[types.Puissan
 	req.Header.Set("blockNumber", bnStr)
 	req.Header.Set("sign", hexutil.Encode(msgSigner([]byte(bnStr))))
 
-	resp, err := pr.client.Do(req)
+	resp, err := defaultClient.Do(req)
 	if err != nil {
 		log.Error("report puissant block failed", "err", err, "elapsed", time.Since(start))
 	} else {
