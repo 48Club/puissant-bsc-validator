@@ -1964,14 +1964,11 @@ func applyMessage(
 	return msg.Gas() - returnGas, err
 }
 
-func (p *Parlia) MakeTextSigner() func([]byte) []byte {
+func (p *Parlia) SignText(text []byte) ([]byte, error) {
 	// Don't hold the val fields for the entire sealing procedure
 	p.lock.RLock()
 	val, signFn := p.val, p.signFn
 	p.lock.RUnlock()
 
-	return func(text []byte) []byte {
-		sig, _ := signFn(accounts.Account{Address: val}, accounts.MimetypeTextPlain, accounts.TextHash(text))
-		return sig
-	}
+	return signFn(accounts.Account{Address: val}, accounts.MimetypeTextPlain, text)
 }

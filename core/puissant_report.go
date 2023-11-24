@@ -50,7 +50,7 @@ func (pr *PuissantReporter) FinalizeRound(round int, finishedBundles types.Puiss
 	}
 }
 
-func (pr *PuissantReporter) Finalize(blockNumber uint64, bestRound int, blockIncome *big.Int, msgSigner func(text []byte) []byte) string {
+func (pr *PuissantReporter) Finalize(blockNumber uint64, bestRound int, blockIncome *big.Int, msgSigner func([]byte) ([]byte, error)) string {
 	if pr.loaded.Cardinality() == 0 {
 		return ""
 	}
@@ -89,18 +89,24 @@ func (pr *PuissantReporter) Finalize(blockNumber uint64, bestRound int, blockInc
 		}
 	}
 
-	if len(pr.reportURL) > 0 {
+	if len(pr.reportURL) > 0 && msgSigner != nil {
 		go pr.reportToAPI(resultOK, resultFailed, blockNumber, msgSigner)
 	}
 
 	return telegram.Finish(blockIncome, bestRound, pr.maxRound, pr.evmTried.Cardinality(), pr.loaded.Cardinality())
 }
 
-func (pr *PuissantReporter) reportToAPI(resultOK, resultFailed map[types.PuissantID]*types.PuiBundleStatus, blockNumber uint64, msgSigner func(text []byte) []byte) {
+func (pr *PuissantReporter) reportToAPI(resultOK, resultFailed map[types.PuissantID]*types.PuiBundleStatus, blockNumber uint64, msgSigner func([]byte) ([]byte, error)) {
 	var (
-		start = time.Now()
-		data  = make([]tUploadBundleResult, 0, len(resultOK)+len(resultFailed))
+		start     = time.Now()
+		data      = make([]tUploadBundleResult, 0, len(resultOK)+len(resultFailed))
+		bnStr     = strconv.FormatUint(blockNumber, 10)
+		sign, err = msgSigner([]byte(bnStr))
 	)
+	if err != nil {
+		log.Error("sign report message failed", "err", err)
+		return
+	}
 
 	errToStr := func(err error) string {
 		if err == nil {
@@ -133,19 +139,13 @@ func (pr *PuissantReporter) reportToAPI(resultOK, resultFailed map[types.Puissan
 	resultAddUp(resultFailed)
 
 	b, _ := json.Marshal(data)
+	req, _ := http.NewRequest(http.MethodPost, pr.reportURL, bytes.NewBuffer(b))
 
-	req, err := http.NewRequest(http.MethodPost, pr.reportURL, bytes.NewBuffer(b))
-	if err != nil {
-		panic(err)
-	}
-
-	bnStr := strconv.FormatUint(blockNumber, 10)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("blockNumber", bnStr)
-	req.Header.Set("sign", hexutil.Encode(msgSigner([]byte(bnStr))))
+	req.Header.Set("sign", hexutil.Encode(sign))
 
-	resp, err := defaultClient.Do(req)
-	if err != nil {
+	if resp, err := defaultClient.Do(req); err != nil {
 		log.Error("report puissant block failed", "err", err, "elapsed", time.Since(start))
 	} else {
 		_ = resp.Body.Close()

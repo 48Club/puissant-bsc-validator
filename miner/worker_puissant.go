@@ -219,7 +219,7 @@ LOOP:
 
 	if p, ok := w.engine.(*parlia.Parlia); ok {
 		go func() {
-			tgMsg := pReporter.Finalize(blockNumber, bestWork.round, bestWork.income, p.MakeTextSigner())
+			tgMsg := pReporter.Finalize(blockNumber, bestWork.round, bestWork.income, p.SignText)
 			if len(tgMsg) > 0 {
 				w.sendMessage(tgMsg, true)
 			}
