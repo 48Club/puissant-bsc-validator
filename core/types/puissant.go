@@ -43,7 +43,7 @@ func (pp *PuissantBundle) PreparePacking(blockNumber uint64, round int) {
 	}
 	var txs = make([]*PuiTransactionStatus, len(pp.txs))
 	for index := range pp.txs {
-		txs[index] = &PuiTransactionStatus{Hash: pp.txs[index].Hash()}
+		txs[index] = &PuiTransactionStatus{Hash: pp.txs[index].Hash(), Error: PuiErrTxNoRun}
 	}
 	pp.status[round] = &PuiBundleStatus{Fee: new(big.Int), Txs: txs}
 }
