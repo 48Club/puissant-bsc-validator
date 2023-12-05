@@ -64,6 +64,7 @@ import (
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/rpc"
+	"github.com/ethereum/go-ethereum/trie/triedb/pathdb"
 )
 
 // Config contains the configuration options of the ETH protocol.
@@ -130,7 +131,9 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		log.Warn("Sanitizing invalid miner gas price", "provided", config.Miner.GasPrice, "updated", ethconfig.Defaults.Miner.GasPrice)
 		config.Miner.GasPrice = new(big.Int).Set(ethconfig.Defaults.Miner.GasPrice)
 	}
-	if config.NoPruning && config.TrieDirtyCache > 0 {
+	// Redistribute memory allocation from in-memory trie node garbage collection
+	// to other caches when an archive node is requested.
+	if config.StateScheme == rawdb.HashScheme && config.NoPruning && config.TrieDirtyCache > 0 {
 		if config.SnapshotCache > 0 {
 			config.TrieCleanCache += config.TrieDirtyCache * 3 / 5
 			config.SnapshotCache += config.TrieDirtyCache * 2 / 5
@@ -138,6 +141,13 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			config.TrieCleanCache += config.TrieDirtyCache
 		}
 		config.TrieDirtyCache = 0
+	}
+	// Optimize memory distribution by reallocating surplus allowance from the
+	// dirty cache to the clean cache.
+	if config.StateScheme == rawdb.PathScheme && config.TrieDirtyCache > pathdb.MaxDirtyBufferSize/1024/1024 {
+		log.Info("Capped dirty cache size", "provided", common.StorageSize(config.TrieDirtyCache)*1024*1024, "adjusted", common.StorageSize(pathdb.MaxDirtyBufferSize))
+		log.Info("Clean cache size", "provided", common.StorageSize(config.TrieCleanCache)*1024*1024)
+		config.TrieDirtyCache = pathdb.MaxDirtyBufferSize / 1024 / 1024
 	}
 	log.Info("Allocated trie memory caches", "clean", common.StorageSize(config.TrieCleanCache)*1024*1024, "dirty", common.StorageSize(config.TrieDirtyCache)*1024*1024)
 
@@ -147,8 +157,10 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := pruner.RecoverPruning(stack.ResolvePath(""), chainDb, config.TriesInMemory); err != nil {
-		log.Error("Failed to recover state", "error", err)
+	if config.StateScheme == rawdb.HashScheme {
+		if err := pruner.RecoverPruning(stack.ResolvePath(""), chainDb, config.TriesInMemory); err != nil {
+			log.Error("Failed to recover state", "error", err)
+		}
 	}
 	chainConfig, genesisHash, err := core.LoadChainConfig(chainDb, config.Genesis)
 	if err != nil {
@@ -212,6 +224,9 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			SnapshotLimit:       config.SnapshotCache,
 			TriesInMemory:       config.TriesInMemory,
 			Preimages:           config.Preimages,
+			StateHistory:        config.StateHistory,
+			StateScheme:         config.StateScheme,
+			PathSyncFlush:       config.PathSyncFlush,
 		}
 	)
 	bcOps := make([]core.BlockChainOption, 0)
@@ -235,7 +250,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	if config.OverrideVerkle != nil {
 		overrides.OverrideVerkle = config.OverrideVerkle
 	}
-	eth.blockchain, err = core.NewBlockChain(chainDb, cacheConfig, config.Genesis, &overrides, eth.engine, vmConfig, eth.shouldPreserve, &config.TxLookupLimit, bcOps...)
+	eth.blockchain, err = core.NewBlockChain(chainDb, cacheConfig, config.Genesis, &overrides, eth.engine, vmConfig, eth.shouldPreserve, &config.TransactionHistory, bcOps...)
 	if err != nil {
 		return nil, err
 	}
@@ -533,7 +548,7 @@ func (s *Ethereum) StartMining() error {
 		}
 		// If mining is started, we can disable the transaction rejection mechanism
 		// introduced to speed sync times.
-		s.handler.acceptTxs.Store(true)
+		s.handler.enableSyncedFeatures()
 
 		go s.miner.Start()
 	}
@@ -567,7 +582,7 @@ func (s *Ethereum) ChainDb() ethdb.Database            { return s.chainDb }
 func (s *Ethereum) IsListening() bool                  { return true } // Always listening
 func (s *Ethereum) Downloader() *downloader.Downloader { return s.handler.downloader }
 func (s *Ethereum) Synced() bool                       { return s.handler.acceptTxs.Load() }
-func (s *Ethereum) SetSynced()                         { s.handler.acceptTxs.Store(true) }
+func (s *Ethereum) SetSynced()                         { s.handler.enableSyncedFeatures() }
 func (s *Ethereum) ArchiveMode() bool                  { return s.config.NoPruning }
 func (s *Ethereum) BloomIndexer() *core.ChainIndexer   { return s.bloomIndexer }
 func (s *Ethereum) Merger() *consensus.Merger          { return s.merger }

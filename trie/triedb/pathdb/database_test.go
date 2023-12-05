@@ -46,7 +46,8 @@ func updateTrie(addrHash common.Hash, root common.Hash, dirties, cleans map[comm
 			h.Update(key.Bytes(), val)
 		}
 	}
-	return h.Commit(false)
+	root, nodes, _ := h.Commit(false)
+	return root, nodes
 }
 
 func generateAccount(storageRoot common.Hash) types.StateAccount {
@@ -95,11 +96,15 @@ type tester struct {
 	snapStorages map[common.Hash]map[common.Hash]map[common.Hash][]byte
 }
 
-func newTester(t *testing.T) *tester {
+func newTester(t *testing.T, historyLimit uint64) *tester {
 	var (
 		disk, _ = rawdb.NewDatabaseWithFreezer(rawdb.NewMemoryDatabase(), t.TempDir(), "", false, false, false, false)
-		db      = New(disk, &Config{CleanSize: 256 * 1024, DirtySize: 256 * 1024})
-		obj     = &tester{
+		db      = New(disk, &Config{
+			StateHistory:   historyLimit,
+			CleanCacheSize: 256 * 1024,
+			DirtyCacheSize: 256 * 1024,
+		})
+		obj = &tester{
 			db:           db,
 			preimages:    make(map[common.Hash]common.Address),
 			accounts:     make(map[common.Hash][]byte),
@@ -375,7 +380,7 @@ func (t *tester) bottomIndex() int {
 
 func TestDatabaseRollback(t *testing.T) {
 	// Verify state histories
-	tester := newTester(t)
+	tester := newTester(t, 0)
 	defer tester.release()
 
 	if err := tester.verifyHistory(); err != nil {
@@ -401,7 +406,7 @@ func TestDatabaseRollback(t *testing.T) {
 
 func TestDatabaseRecoverable(t *testing.T) {
 	var (
-		tester = newTester(t)
+		tester = newTester(t, 0)
 		index  = tester.bottomIndex()
 	)
 	defer tester.release()
@@ -440,7 +445,7 @@ func TestDatabaseRecoverable(t *testing.T) {
 
 func TestReset(t *testing.T) {
 	var (
-		tester = newTester(t)
+		tester = newTester(t, 0)
 		index  = tester.bottomIndex()
 	)
 	defer tester.release()
@@ -474,7 +479,7 @@ func TestReset(t *testing.T) {
 }
 
 func TestCommit(t *testing.T) {
-	tester := newTester(t)
+	tester := newTester(t, 0)
 	defer tester.release()
 
 	if err := tester.db.Commit(tester.lastHash(), false); err != nil {
@@ -498,7 +503,7 @@ func TestCommit(t *testing.T) {
 }
 
 func TestJournal(t *testing.T) {
-	tester := newTester(t)
+	tester := newTester(t, 0)
 	defer tester.release()
 
 	if err := tester.db.Journal(tester.lastHash()); err != nil {
@@ -522,7 +527,7 @@ func TestJournal(t *testing.T) {
 }
 
 func TestCorruptedJournal(t *testing.T) {
-	tester := newTester(t)
+	tester := newTester(t, 0)
 	defer tester.release()
 
 	if err := tester.db.Journal(tester.lastHash()); err != nil {
@@ -548,6 +553,35 @@ func TestCorruptedJournal(t *testing.T) {
 		if err := tester.verifyState(tester.roots[i]); err == nil {
 			t.Fatal("Unexpected state")
 		}
+	}
+}
+
+// TestTailTruncateHistory function is designed to test a specific edge case where,
+// when history objects are removed from the end, it should trigger a state flush
+// if the ID of the new tail object is even higher than the persisted state ID.
+//
+// For example, let's say the ID of the persistent state is 10, and the current
+// history objects range from ID(5) to ID(15). As we accumulate six more objects,
+// the history will expand to cover ID(11) to ID(21). ID(11) then becomes the
+// oldest history object, and its ID is even higher than the stored state.
+//
+// In this scenario, it is mandatory to update the persistent state before
+// truncating the tail histories. This ensures that the ID of the persistent state
+// always falls within the range of [oldest-history-id, latest-history-id].
+func TestTailTruncateHistory(t *testing.T) {
+	tester := newTester(t, 10)
+	defer tester.release()
+
+	tester.db.Close()
+	tester.db = New(tester.db.diskdb, &Config{StateHistory: 10})
+
+	head, err := tester.db.freezer.Ancients()
+	if err != nil {
+		t.Fatalf("Failed to obtain freezer head")
+	}
+	stored := rawdb.ReadPersistentStateID(tester.db.diskdb)
+	if head != stored {
+		t.Fatalf("Failed to truncate excess history object above, stored: %d, head: %d", stored, head)
 	}
 }
 

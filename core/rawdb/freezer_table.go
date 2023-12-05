@@ -220,6 +220,9 @@ func (t *freezerTable) repair() error {
 	}
 	// Ensure the index is a multiple of indexEntrySize bytes
 	if overflow := stat.Size() % indexEntrySize; overflow != 0 {
+		if t.readonly {
+			return fmt.Errorf("index file(path: %s, name: %s) size is not a multiple of %d", t.path, t.name, indexEntrySize)
+		}
 		truncateFreezerFile(t.index, stat.Size()-overflow) // New file can't trigger this path
 	}
 	// Retrieve the file sizes and prepare for truncation
@@ -278,6 +281,9 @@ func (t *freezerTable) repair() error {
 	// Keep truncating both files until they come in sync
 	contentExp = int64(lastIndex.offset)
 	for contentExp != contentSize {
+		if t.readonly {
+			return fmt.Errorf("freezer table(path: %s, name: %s, num: %d) is corrupted", t.path, t.name, lastIndex.filenum)
+		}
 		verbose = true
 		// Truncate the head file to the last offset pointer
 		if contentExp < contentSize {
@@ -948,4 +954,34 @@ func (t *freezerTable) dumpIndex(w io.Writer, start, stop int64) {
 		}
 	}
 	fmt.Fprintf(w, "|--------------------------|\n")
+}
+
+func (t *freezerTable) ResetItemsOffset(virtualTail uint64) error {
+	stat, err := t.index.Stat()
+	if err != nil {
+		return err
+	}
+
+	if stat.Size() == 0 {
+		return fmt.Errorf("Stat size is zero when ResetVirtualTail.")
+	}
+
+	var firstIndex indexEntry
+
+	buffer := make([]byte, indexEntrySize)
+
+	t.index.ReadAt(buffer, 0)
+	firstIndex.unmarshalBinary(buffer)
+
+	firstIndex.offset = uint32(virtualTail)
+	t.index.WriteAt(firstIndex.append(nil), 0)
+
+	var firstIndex2 indexEntry
+	buffer2 := make([]byte, indexEntrySize)
+	t.index.ReadAt(buffer2, 0)
+	firstIndex2.unmarshalBinary(buffer2)
+
+	log.Info("Reset Index", "filenum", t.index.Name(), "offset", firstIndex2.offset)
+
+	return nil
 }
