@@ -731,12 +731,6 @@ func (w *worker) commit(env *core.MinerEnvironment, interval func(), update bool
 			interval()
 		}
 
-		err := env.State.WaitPipeVerification()
-		if err != nil {
-			return err
-		}
-		env.State.CorrectAccountsRoot(w.chain.CurrentBlock().Root)
-
 		// Withdrawals are set to nil here, because this is only called in PoW.
 		finalizeStart := time.Now()
 		block, receipts, err := w.engine.FinalizeAndAssemble(w.chain, types.CopyHeader(env.Header), env.State, env.PackedTxs, nil, env.Receipts, nil)

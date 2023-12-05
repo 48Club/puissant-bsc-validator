@@ -1,4 +1,20 @@
 # Changelog
+## v1.3.4
+BUGFIX
+* fix: remove pipecommit in miner
+* add a hard fork: Hertzfix
+
+## v1.3.3
+IMPROVEMENT
+* [\#2000](https://github.com/bnb-chain/bsc/pull/2000) cmd/utils: exit process if txlookuplimit flag is set
+
+BUGFIX
+* [\#1986](https://github.com/bnb-chain/bsc/pull/1986) fix(cmd): check pruneancient when creating db
+
+## v1.3.2
+BUGFIX
+* fix: remove sharedPool
+
 ## v1.3.1
 FEATURE
 * [\#1881](https://github.com/bnb-chain/bsc/pull/1881) feat: active pbss
