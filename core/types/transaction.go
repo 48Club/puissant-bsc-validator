@@ -61,10 +61,6 @@ type Transaction struct {
 	// 48club modified
 	bundle        *PuissantBundle
 	bundleTxIndex int
-	//puissantID      PuissantID
-	//puissantSeq     int
-	//puissantTxSeq   int
-	//acceptReverting bool
 }
 
 // NewTx creates a new transaction.
@@ -115,38 +111,6 @@ func (tx *Transaction) SetBundle(b *PuissantBundle, txIndex int) {
 func (tx *Transaction) Bundle() (*PuissantBundle, int) {
 	return tx.bundle, tx.bundleTxIndex
 }
-
-//func (tx *Transaction) PuissantInfo() (PuissantID, int, int) {
-//	return tx.puissantID, tx.puissantSeq, tx.puissantTxSeq
-//}
-//
-//func (tx *Transaction) IsPuissant() bool {
-//	return tx.puissantID.IsPuissant()
-//}
-//
-//func (tx *Transaction) PuissantID() PuissantID {
-//	return tx.puissantID
-//}
-//
-//func (tx *Transaction) AcceptsReverting() bool {
-//	return tx.acceptReverting
-//}
-//
-//func (tx *Transaction) SetPuissantTxSeq(txSeq int) {
-//	tx.puissantTxSeq = txSeq
-//}
-//
-//func (tx *Transaction) SetPuissantAcceptReverting() {
-//	tx.acceptReverting = true
-//}
-//
-//func (tx *Transaction) SetPuissantID(id PuissantID) {
-//	tx.puissantID = id
-//}
-//
-//func (tx *Transaction) SetPuissantSeq(seq int) {
-//	tx.puissantSeq = seq
-//}
 
 // EncodeRLP implements rlp.Encoder
 func (tx *Transaction) EncodeRLP(w io.Writer) error {
