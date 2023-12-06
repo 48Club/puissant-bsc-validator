@@ -95,13 +95,15 @@ func (config *Config) sanitize() Config {
 }
 
 type PuissantPool struct {
-	config       Config
-	chainconfig  *params.ChainConfig
-	chain        BlockChain
-	gasTip       *big.Int
+	config      Config
+	chainconfig *params.ChainConfig
+	chain       BlockChain
+
+	gasTip       atomic.Pointer[big.Int]
 	holderGasTip *big.Int
-	signer       types.Signer
-	mu           sync.RWMutex
+
+	signer types.Signer
+	mu     sync.RWMutex
 
 	currentHead   atomic.Pointer[types.Header] // Current head of the blockchain
 	currentState  *state.StateDB               // Current state in the blockchain head
@@ -159,7 +161,8 @@ func New(config Config, chain BlockChain, ethAPI *ethapi.BlockChainAPI) *Puissan
 
 func (pool *PuissantPool) Init(head *types.Header) error {
 	// Set the basic pool parameters
-	pool.gasTip = new(big.Int).SetUint64(pool.config.PriceLimit)
+
+	pool.gasTip.Store(new(big.Int).SetUint64(pool.config.PriceLimit))
 	pool.holderGasTip = new(big.Int).SetUint64(pool.config.HolderLimit)
 
 	pool.reset(nil, head)
@@ -170,6 +173,14 @@ func (pool *PuissantPool) Init(head *types.Header) error {
 	go pool.scheduleReorgLoop()
 
 	return nil
+}
+
+// SetGasTip updates the minimum gas tip required by the transaction pool for a
+// new transaction, and drops all transactions below this threshold.
+func (pool *PuissantPool) SetGasTip(tip *big.Int) {
+	pool.gasTip.Store(new(big.Int).Set(tip))
+
+	log.Info("Puissant pool tip threshold updated", "tip", tip)
 }
 
 func (pool *PuissantPool) Close() error {
@@ -193,7 +204,7 @@ func (pool *PuissantPool) AddPuissantBundle(bundle *types.PuissantBundle, relayS
 	pool.mu.Lock()
 	defer pool.mu.Unlock()
 
-	if err := pool.validatePuissantTxs(bundle); err != nil {
+	if err := pool.validateBundleTxs(bundle); err != nil {
 		return err
 	}
 

@@ -20,25 +20,12 @@ import (
 )
 
 var (
-
-	// ErrAlreadyKnown is returned if the transactions is already contained
-	// within the pool.
-	ErrAlreadyKnown = errors.New("already known")
-
 	// ErrInvalidSender is returned if the transaction contains an invalid signature.
 	ErrInvalidSender = errors.New("invalid sender")
 
 	// ErrUnderpriced is returned if a transaction's gas price is below the minimum
 	// configured for the transaction pool.
 	ErrUnderpriced = errors.New("transaction underpriced")
-
-	// ErrReplaceUnderpriced is returned if a transaction is attempted to be replaced
-	// with a different one without the required price bump.
-	ErrReplaceUnderpriced = errors.New("replacement transaction underpriced")
-
-	// ErrAccountLimitExceeded is returned if a transaction would exceed the number
-	// allowed by a pool for a single account.
-	ErrAccountLimitExceeded = errors.New("account limit exceeded")
 
 	// ErrGasLimit is returned if a transaction's requested gas limit exceeds the
 	// maximum allowance of the current block.
@@ -52,16 +39,13 @@ var (
 	// than some meaningful limit a user might use. This is not a consensus error
 	// making the transaction invalid, rather a DOS protection.
 	ErrOversizedData = errors.New("oversized data")
-
-	// ErrFutureReplacePending is returned if a future transaction replaces a pending
-	// transaction. Future transactions should only be able to replace other future transactions.
-	ErrFutureReplacePending = errors.New("future transaction tries to replace pending")
 )
 
-func (pool *PuissantPool) validatePuissantTxs(bundle *types.PuissantBundle) error {
+func (pool *PuissantPool) validateBundleTxs(bundle *types.PuissantBundle) error {
 
 	var (
 		head    = pool.currentHead.Load()
+		gasTip  = pool.gasTip.Load()
 		needNFT = false
 	)
 
@@ -129,12 +113,12 @@ func (pool *PuissantPool) validatePuissantTxs(bundle *types.PuissantBundle) erro
 		}
 		// Ensure the gasprice is high enough to cover the requirement of the calling
 		// pool and/or block producer
-		if tx.GasTipCapIntCmp(pool.gasTip) < 0 {
+		if tx.GasTipCapIntCmp(gasTip) < 0 {
 			if tx.GasTipCapIntCmp(pool.holderGasTip) < 0 {
-				if pool.holderGasTip.Cmp(pool.gasTip) < 0 {
-					return tx.Errorf(fmt.Errorf("%w: tip needed %v, or %v for 48Club NFT holder, tip permitted %v", ErrUnderpriced, pool.gasTip, pool.holderGasTip, tx.GasTipCap()))
+				if pool.holderGasTip.Cmp(gasTip) < 0 {
+					return tx.Errorf(fmt.Errorf("%w: tip needed %v, or %v for 48Club NFT holder, tip permitted %v", ErrUnderpriced, gasTip, pool.holderGasTip, tx.GasTipCap()))
 				}
-				return tx.Errorf(fmt.Errorf("%w: tip needed %v, tip permitted %v", ErrUnderpriced, pool.gasTip, tx.GasTipCap()))
+				return tx.Errorf(fmt.Errorf("%w: tip needed %v, tip permitted %v", ErrUnderpriced, gasTip, tx.GasTipCap()))
 			}
 			needNFT = true
 		}
@@ -154,7 +138,7 @@ func (pool *PuissantPool) validatePuissantTxs(bundle *types.PuissantBundle) erro
 
 	sender, _ := bundle.Sender(pool.signer)
 	if needNFT && !pool.is48NFTHolder(sender) {
-		return fmt.Errorf("%w: bundle tx minimal tip needed %v, or %v for 48Club NFT holder", ErrUnderpriced, pool.gasTip, pool.holderGasTip)
+		return fmt.Errorf("%w: bundle tx minimal tip needed %v, or %v for 48Club NFT holder", ErrUnderpriced, gasTip, pool.holderGasTip)
 	}
 
 	return nil

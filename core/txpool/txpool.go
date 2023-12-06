@@ -254,6 +254,9 @@ func (p *TxPool) SetGasTip(tip *big.Int) {
 	for _, subpool := range p.subpools {
 		subpool.SetGasTip(tip)
 	}
+	if p.puissantPool != nil {
+		p.puissantPool.SetGasTip(tip)
+	}
 }
 
 // Has returns an indicator whether the pool has a transaction cached with the
