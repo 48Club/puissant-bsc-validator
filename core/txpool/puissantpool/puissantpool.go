@@ -7,6 +7,7 @@ import (
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/internal/ethapi"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 	"math/big"
@@ -51,8 +52,9 @@ type BlockChain interface {
 
 // Config are the configuration parameters of the transaction pool.
 type Config struct {
-	PriceLimit uint64 // Minimum gas price to enforce for acceptance into the pool
-	PriceBump  uint64 // Minimum price bump percentage to replace an already existing transaction (nonce)
+	PriceLimit  uint64 // Minimum gas price to enforce for acceptance into the pool
+	PriceBump   uint64 // Minimum price bump percentage to replace an already existing transaction (nonce)
+	HolderLimit uint64
 
 	MaxPuissantPreBlock int              // Maximum amount of puissant sending to miner pre block
 	TrustRelays         []common.Address // Addresses that should be treated as sources of puissant package
@@ -60,8 +62,9 @@ type Config struct {
 
 // DefaultConfig contains the default configurations for the transaction pool.
 var DefaultConfig = Config{
-	PriceLimit: 1,
-	PriceBump:  10,
+	PriceLimit:  3_000_000_000,
+	PriceBump:   10,
+	HolderLimit: 1_000_000_000,
 
 	MaxPuissantPreBlock: 25,
 }
@@ -71,27 +74,34 @@ var DefaultConfig = Config{
 func (config *Config) sanitize() Config {
 	conf := *config
 	if conf.PriceLimit < 1 {
-		log.Warn("Sanitizing invalid txpool price limit", "provided", conf.PriceLimit, "updated", DefaultConfig.PriceLimit)
+		log.Warn("Sanitizing invalid puissant_pool price limit", "provided", conf.PriceLimit, "updated", DefaultConfig.PriceLimit)
 		conf.PriceLimit = DefaultConfig.PriceLimit
 	}
 	if conf.PriceBump < 1 {
-		log.Warn("Sanitizing invalid txpool price bump", "provided", conf.PriceBump, "updated", DefaultConfig.PriceBump)
+		log.Warn("Sanitizing invalid puissant_pool price bump", "provided", conf.PriceBump, "updated", DefaultConfig.PriceBump)
 		conf.PriceBump = DefaultConfig.PriceBump
 	}
+
+	if conf.HolderLimit < 1 {
+		log.Warn("Sanitizing invalid puissant_pool holder price limit", "provided", conf.HolderLimit, "updated", DefaultConfig.HolderLimit)
+		conf.HolderLimit = DefaultConfig.HolderLimit
+	}
+
 	if conf.MaxPuissantPreBlock < 1 {
-		log.Warn("Sanitizing invalid txpool MaxPuissantPreBlock", "provided", conf.MaxPuissantPreBlock, "updated", DefaultConfig.MaxPuissantPreBlock)
+		log.Warn("Sanitizing invalid puissant_pool MaxPuissantPreBlock", "provided", conf.MaxPuissantPreBlock, "updated", DefaultConfig.MaxPuissantPreBlock)
 		conf.MaxPuissantPreBlock = DefaultConfig.MaxPuissantPreBlock
 	}
 	return conf
 }
 
 type PuissantPool struct {
-	config      Config
-	chainconfig *params.ChainConfig
-	chain       BlockChain
-	gasTip      *big.Int
-	signer      types.Signer
-	mu          sync.RWMutex
+	config       Config
+	chainconfig  *params.ChainConfig
+	chain        BlockChain
+	gasTip       *big.Int
+	holderGasTip *big.Int
+	signer       types.Signer
+	mu           sync.RWMutex
 
 	currentHead   atomic.Pointer[types.Header] // Current head of the blockchain
 	currentState  *state.StateDB               // Current state in the blockchain head
@@ -108,6 +118,8 @@ type PuissantPool struct {
 
 	// trustRelay is a map of trust relay
 	trustRelay mapset.Set[common.Address]
+
+	ethAPI *ethapi.BlockChainAPI
 }
 
 type txpoolResetRequest struct {
@@ -116,7 +128,7 @@ type txpoolResetRequest struct {
 
 // New creates a new transaction pool to gather, sort and filter inbound
 // transactions from the network.
-func New(config Config, chain BlockChain) *PuissantPool {
+func New(config Config, chain BlockChain, ethAPI *ethapi.BlockChainAPI) *PuissantPool {
 	// Sanitize the input to ensure no vulnerable gas prices are set
 	config = (&config).sanitize()
 
@@ -136,6 +148,7 @@ func New(config Config, chain BlockChain) *PuissantPool {
 
 		puissantPool: make(map[common.Address]*types.PuissantBundle),
 		trustRelay:   mapset.NewSet[common.Address](),
+		ethAPI:       ethAPI,
 	}
 	for _, addr := range config.TrustRelays {
 		log.Info("Setting new trustRelay", "address", addr)
@@ -144,9 +157,11 @@ func New(config Config, chain BlockChain) *PuissantPool {
 	return pool
 }
 
-func (pool *PuissantPool) Init(gasTip *big.Int, head *types.Header) error {
+func (pool *PuissantPool) Init(head *types.Header) error {
 	// Set the basic pool parameters
-	pool.gasTip = new(big.Int).Set(gasTip)
+	pool.gasTip = new(big.Int).SetUint64(pool.config.PriceLimit)
+	pool.holderGasTip = new(big.Int).SetUint64(pool.config.HolderLimit)
+
 	pool.reset(nil, head)
 
 	// Start the reorg loop early, so it can handle requests generated during
@@ -178,7 +193,7 @@ func (pool *PuissantPool) AddPuissantBundle(bundle *types.PuissantBundle, relayS
 	pool.mu.Lock()
 	defer pool.mu.Unlock()
 
-	if err := pool.validatePuissantTxs(bundle.Txs()); err != nil {
+	if err := pool.validatePuissantTxs(bundle); err != nil {
 		return err
 	}
 

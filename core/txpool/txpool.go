@@ -102,7 +102,7 @@ func New(gasTip *big.Int, chain BlockChain, subpools []SubPool, puissantPool *pu
 		}
 	}
 	if puissantPool != nil {
-		if err := puissantPool.Init(gasTip, head); err != nil {
+		if err := puissantPool.Init(head); err != nil {
 			return nil, err
 		}
 	}

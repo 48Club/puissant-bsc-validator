@@ -266,7 +266,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		config.TxPool.Journal = stack.ResolvePath(config.TxPool.Journal)
 	}
 	legacyPool := legacypool.New(config.TxPool, eth.blockchain)
-	puissantPool := puissantpool.New(config.PuissantPool, eth.blockchain)
+	puissantPool := puissantpool.New(config.PuissantPool, eth.blockchain, ethAPI)
 
 	eth.txPool, err = txpool.New(new(big.Int).SetUint64(config.TxPool.PriceLimit), eth.blockchain, []txpool.SubPool{legacyPool}, puissantPool)
 	if err != nil {
