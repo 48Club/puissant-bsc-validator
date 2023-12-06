@@ -19,7 +19,6 @@ package ethapi
 
 import (
 	"context"
-	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"math/big"
 	"time"
@@ -104,7 +103,7 @@ type Backend interface {
 	SubscribeFinalizedHeaderEvent(ch chan<- core.FinalizedHeaderEvent) event.Subscription
 	SubscribeNewVoteEvent(chan<- core.NewVoteEvent) event.Subscription
 
-	SendPuissant(ctx context.Context, pid types.PuissantID, txs types.Transactions, revertible mapset.Set[common.Hash], maxTimestamp uint64, relaySignature hexutil.Bytes) error
+	SendPuissant(ctx context.Context, bundle *types.PuissantBundle, relaySignature hexutil.Bytes) error
 }
 
 func GetAPIs(apiBackend Backend) []rpc.API {

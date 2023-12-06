@@ -170,25 +170,23 @@ func (pool *PuissantPool) Reset(oldHead, newHead *types.Header) {
 	<-wait
 }
 
-func (pool *PuissantPool) AddPuissantBundle(pid types.PuissantID, txs types.Transactions, revertible mapset.Set[common.Hash], maxTimestamp uint64, relaySignature hexutil.Bytes) error {
-	if err := pool.isFromTrustedRelay(pid, relaySignature); err != nil {
+func (pool *PuissantPool) AddPuissantBundle(bundle *types.PuissantBundle, relaySignature hexutil.Bytes) error {
+	if err := pool.isFromTrustedRelay(bundle.ID(), relaySignature); err != nil {
 		return err
 	}
 
 	pool.mu.Lock()
 	defer pool.mu.Unlock()
 
-	if err := pool.validatePuissantTxs(txs); err != nil {
+	if err := pool.validatePuissantTxs(bundle.Txs()); err != nil {
 		return err
 	}
 
-	senderID, _ := types.Sender(pool.signer, txs[0])
-
-	newPuissant := types.NewPuissantBundle(pid, txs, revertible, maxTimestamp)
-	if v, has := pool.puissantPool[senderID]; has && !v.ReplacedByNewPuissant(newPuissant, pool.config.PriceBump) {
+	senderID, _ := bundle.Sender(pool.signer)
+	if v, has := pool.puissantPool[senderID]; has && !v.ReplacedByNewPuissant(bundle, pool.config.PriceBump) {
 		return errors.New("insufficient bid price bump for overwriting")
 	} else {
-		pool.puissantPool[senderID] = newPuissant
+		pool.puissantPool[senderID] = bundle
 	}
 	return nil
 }
@@ -293,12 +291,6 @@ func (pool *PuissantPool) PendingPuissantBundles(blockTimestamp uint64) types.Pu
 		poolPx = append(poolPx, each)
 	}
 	sort.Sort(poolPx)
-
-	//for bundleIndex, each := range poolPx {
-	//	for _, tx := range each.Txs() {
-	//		tx.SetPuissantSeq(bundleIndex)
-	//	}
-	//}
 
 	if len(poolPx) <= pool.config.MaxPuissantPreBlock {
 		return poolPx

@@ -38,7 +38,7 @@ func (p PuissantID) setBytes(b []byte) {
 	copy(p[16-len(b):], b)
 }
 
-func GenPuissantID(txs []*Transaction, revertible mapset.Set[common.Hash], maxTimestamp uint64) PuissantID {
+func genPuissantID(txs []*Transaction, revertible mapset.Set[common.Hash], maxTimestamp uint64) PuissantID {
 	var msg bytes.Buffer
 	msg.Grow(len(txs)*(common.HashLength+1) + 4)
 

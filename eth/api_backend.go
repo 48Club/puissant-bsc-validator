@@ -19,7 +19,6 @@ package eth
 import (
 	"context"
 	"errors"
-	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"math/big"
 	"time"
@@ -292,8 +291,8 @@ func (b *EthAPIBackend) SendTx(ctx context.Context, signedTx *types.Transaction)
 	return b.eth.txPool.Add([]*txpool.Transaction{{Tx: signedTx}}, true, false)[0]
 }
 
-func (b *EthAPIBackend) SendPuissant(ctx context.Context, pid types.PuissantID, txs types.Transactions, revertible mapset.Set[common.Hash], maxTimestamp uint64, relaySignature hexutil.Bytes) error {
-	return b.eth.txPool.AddPuissantBundle(pid, txs, revertible, maxTimestamp, relaySignature)
+func (b *EthAPIBackend) SendPuissant(ctx context.Context, bundle *types.PuissantBundle, relaySignature hexutil.Bytes) error {
+	return b.eth.txPool.AddPuissantBundle(bundle, relaySignature)
 }
 
 func (b *EthAPIBackend) GetPoolTransactions() (types.Transactions, error) {

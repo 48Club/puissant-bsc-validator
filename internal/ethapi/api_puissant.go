@@ -82,6 +82,9 @@ func (s *PuissantAPI) SendPuissant(ctx context.Context, args SendPuissantArgs) e
 		return errors.New("duplicate transaction found")
 	}
 
-	bundlePID := types.GenPuissantID(txs, revertible, args.MaxTimestamp)
-	return s.b.SendPuissant(ctx, bundlePID, txs, revertible, args.MaxTimestamp, args.RelaySignature)
+	return s.b.SendPuissant(
+		ctx,
+		types.NewPuissantBundle(txs, revertible, args.MaxTimestamp),
+		args.RelaySignature,
+	)
 }

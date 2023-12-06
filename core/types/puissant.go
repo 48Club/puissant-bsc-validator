@@ -19,12 +19,13 @@ type PuissantBundle struct {
 	status map[int]*PuiBundleStatus
 }
 
-func NewPuissantBundle(pid PuissantID, txs Transactions, revertible mapset.Set[common.Hash], maxTS uint64) *PuissantBundle {
+func NewPuissantBundle(txs Transactions, revertible mapset.Set[common.Hash], maxTS uint64) *PuissantBundle {
 	if txs.Len() == 0 {
 		panic("empty bundle")
 	}
+
 	theBundle := &PuissantBundle{
-		id:         pid,
+		id:         genPuissantID(txs, revertible, maxTS),
 		txs:        txs,
 		expireAt:   maxTS,
 		revertible: revertible,
@@ -109,6 +110,10 @@ func (pp *PuissantBundle) Revertible(hash common.Hash) bool {
 
 func (pp *PuissantBundle) ID() PuissantID {
 	return pp.id
+}
+
+func (pp *PuissantBundle) Sender(signer Signer) (common.Address, error) {
+	return Sender(signer, pp.txs[0])
 }
 
 func (pp *PuissantBundle) ExpireAt() uint64 {
