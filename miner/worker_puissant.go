@@ -113,7 +113,6 @@ LOOP:
 		// empty block at first round
 		if round == 0 {
 			blockNumber = work.Header.Number.Uint64()
-			continue
 		}
 
 		var (
@@ -124,7 +123,9 @@ LOOP:
 			pendingTxs     map[common.Address][]*txpool.LazyTransaction
 			pendingBundles types.PuissantBundles
 		)
-		if isInturn {
+
+		// puissant packing only available for inturn block and not the first round
+		if isInturn && round != 0 {
 			pendingTxs, pendingBundles = w.eth.TxPool().PendingTxsAndPuissant(false, work.Header.Time)
 		} else {
 			pendingTxs = w.eth.TxPool().Pending(false)
