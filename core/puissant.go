@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -60,7 +61,7 @@ func RunPuissantCommitter(
 		select {
 		case <-ctx.Done():
 			// timeout
-			return false, committer.finalStatistics(round, !puissantPool.IsEmpty())
+			return false, committer.finalIntegrityCheck()
 
 		case signal := <-interruptCh:
 			log.Info("packing abort due to interruption", "when", "packingRunTime", "reason", signalToErr(signal))
@@ -71,35 +72,40 @@ func RunPuissantCommitter(
 
 		if gasLeft := workerEnv.GasPool.Gas(); gasLeft < params.TxGas {
 			log.Warn(" 🐶 not enough gas for further transactions, commit directly", "packed-count", workerEnv.TxCount, "have", gasLeft, "want", params.TxGas)
-			return false, committer.finalStatistics(round, !puissantPool.IsEmpty())
+			return false, committer.finalIntegrityCheck()
 		}
 
 		tx := workerEnv.PuissantTxQueue.Peek()
 		if tx == nil {
-			return false, committer.finalStatistics(round, false)
+			return false, nil
 		}
 
 		committer.commitTransaction(round, tx)
 	}
 }
 
-func (p *puissantRuntime) finalStatistics(round int, integrityCheck bool) error {
-	var unfinished = mapset.NewThreadUnsafeSet[types.PuissantID]()
-
-	for _, bundle := range p.bundles {
-		if _, finish := bundle.FinalizeRound(round); !finish {
-			unfinished.Add(bundle.ID())
-		}
+func (p *puissantRuntime) finalIntegrityCheck() error {
+	if p.bundles.IsEmpty() {
+		return nil
 	}
 
-	if integrityCheck {
-		for _, tx := range p.env.PackedTxs {
-			if bundle, _ := tx.Bundle(); bundle != nil && unfinished.Contains(bundle.ID()) {
-				return errors.New("unfinished puissant included")
+	var (
+		includedBundle = mapset.NewThreadUnsafeSet[types.PuissantID]()
+		shouldIncluded int
+		included       int
+	)
+
+	for _, tx := range p.env.PackedTxs {
+		if bundle, _ := tx.Bundle(); bundle != nil {
+			if includedBundle.Add(bundle.ID()) {
+				shouldIncluded += bundle.TxCount()
 			}
+			included++
 		}
 	}
-
+	if shouldIncluded != included {
+		return fmt.Errorf("unfinished bundle included, has=%d, want=%d", included, shouldIncluded)
+	}
 	return nil
 }
 
