@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -449,7 +450,11 @@ func (tx *Transaction) Hash() common.Hash {
 // Errorf returns a new error with the given formatted string.
 func (tx *Transaction) Errorf(e error) error {
 	txString := tx.Hash().Hex()
-	return fmt.Errorf("%s...%s: %v", txString[:5], txString[len(txString)-3:], e)
+	prefix := fmt.Sprintf("%s...%s", txString[:5], txString[len(txString)-3:])
+	if strings.HasPrefix(e.Error(), prefix) {
+		return e
+	}
+	return fmt.Errorf("%s: %v", prefix, e)
 }
 
 // Size returns the true encoded storage size of the transaction, either by encoding

@@ -73,7 +73,7 @@ func (pool *PuissantPool) validateBundleTxs(bundle *types.PuissantBundle) error 
 		// Transactions can't be negative. This may never happen using RLP decoded
 		// transactions but may occur for transactions created using the RPC.
 		if tx.Value().Sign() < 0 {
-			return tx.Errorf(tx.Errorf(ErrNegativeValue))
+			return tx.Errorf(ErrNegativeValue)
 		}
 		// Ensure the transaction doesn't exceed the current block limit gas
 		if head.GasLimit < tx.Gas() {
@@ -128,7 +128,7 @@ func (pool *PuissantPool) validateBundleTxs(bundle *types.PuissantBundle) error 
 			return tx.Errorf(fmt.Errorf("invalid payment tx nonce, have %d, want %d", tx.Nonce(), validNonce))
 
 		} else if validNonce > tx.Nonce() {
-			return tx.Errorf(tx.Errorf(core.ErrNonceTooLow))
+			return tx.Errorf(core.ErrNonceTooLow)
 		}
 
 		if index == 0 && pool.currentState.GetBalance(from).Cmp(tx.Cost()) < 0 {
