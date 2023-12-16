@@ -1474,6 +1474,10 @@ func CalcDifficulty(snap *Snapshot, signer common.Address) *big.Int {
 // SealHash returns the hash of a block without vote attestation prior to it being sealed.
 // So it's not the real hash of a block, just used as unique id to distinguish task
 func (p *Parlia) SealHash(header *types.Header) (hash common.Hash) {
+	defer func(start time.Time) {
+		log.Info("SealHash", "runtime", time.Since(start), "number", header.Number.Uint64())
+	}(time.Now())
+
 	hasher := sha3.NewLegacyKeccak256()
 	encodeSigHeaderWithoutVoteAttestation(hasher, header, p.chainConfig.ChainID)
 	hasher.Sum(hash[:0])
