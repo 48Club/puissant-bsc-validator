@@ -1147,6 +1147,12 @@ func (p *Parlia) Finalize(chain consensus.ChainHeaderReader, header *types.Heade
 // nor block rewards given, and returns the final block.
 func (p *Parlia) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *types.Header, state *state.StateDB,
 	txs []*types.Transaction, uncles []*types.Header, receipts []*types.Receipt, _ []*types.Withdrawal) (*types.Block, []*types.Receipt, error) {
+
+	start := time.Now()
+	defer func(start time.Time) {
+		log.Info("FinalizeAndAssemble Total", "runtime", time.Since(start), "number", header.Number.Uint64())
+	}(start)
+
 	// No block rewards in PoA, so the state remains as is and uncles are dropped
 	cx := chainContext{Chain: chain, parlia: p}
 	if txs == nil {
@@ -1204,6 +1210,9 @@ func (p *Parlia) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *
 		return nil, nil, errors.New("gas consumption of system txs exceed the gas limit")
 	}
 	header.UncleHash = types.CalcUncleHash(nil)
+
+	log.Info("FinalizeAndAssemble Step 1", "runtime", time.Since(start), "number", header.Number.Uint64())
+
 	var blk *types.Block
 	var rootHash common.Hash
 	wg := sync.WaitGroup{}
@@ -1217,6 +1226,8 @@ func (p *Parlia) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *
 		wg.Done()
 	}()
 	wg.Wait()
+	log.Info("FinalizeAndAssemble Step 2", "runtime", time.Since(start), "number", header.Number.Uint64())
+
 	blk.SetRoot(rootHash)
 	// Assemble and return the final block for sealing
 	return blk, receipts, nil
