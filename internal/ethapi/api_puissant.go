@@ -53,9 +53,6 @@ func (s *PuissantAPI) SendPuissant(ctx context.Context, args SendPuissantArgs) e
 		txHash      = mapset.NewThreadUnsafeSet[common.Hash]() // tx hash set for duplicate check
 		revertible  = mapset.NewSet[common.Hash]()             // revertible tx hash set for marking revertible
 	)
-	for _, each := range args.Revertible {
-		revertible.Add(each)
-	}
 
 	for _, encodedTx := range args.Txs {
 		tx := new(types.Transaction)
@@ -73,13 +70,18 @@ func (s *PuissantAPI) SendPuissant(ctx context.Context, args SendPuissantArgs) e
 		} else {
 			return errors.New("invalid, require txs descending sort by gas price")
 		}
-		txHash.Add(tx.Hash())
+
+		// check duplicate transaction in txs
+		if !txHash.Add(tx.Hash()) {
+			return errors.New("invalid, duplicate transaction found")
+		}
 
 		txs = append(txs, tx)
 	}
-	// check duplicate transaction in txs
-	if txHash.Cardinality() != len(txs) {
-		return errors.New("duplicate transaction found")
+	for _, each := range args.Revertible {
+		if !txHash.Contains(each) || !revertible.Add(each) {
+			return errors.New("invalid revertible hash")
+		}
 	}
 
 	return s.b.SendPuissant(
