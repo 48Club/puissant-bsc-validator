@@ -48,7 +48,7 @@ import (
 )
 
 const (
-	inMemorySnapshots  = 128  // Number of recent snapshots to keep in memory
+	inMemorySnapshots  = 256  // Number of recent snapshots to keep in memory
 	inMemorySignatures = 4096 // Number of recent block signatures to keep in memory
 
 	checkpointInterval = 1024        // Number of blocks after which to save the snapshot to the database
@@ -241,6 +241,7 @@ func New(
 ) *Parlia {
 	// get parlia config
 	parliaConfig := chainConfig.Parlia
+	log.Info("Parlia", "chainConfig", chainConfig)
 
 	// Set any missing consensus parameters to their defaults
 	if parliaConfig != nil && parliaConfig.Epoch == 0 {
@@ -680,7 +681,7 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 		// If we're at the genesis, snapshot the initial state. Alternatively if we have
 		// piled up more headers than allowed to be reorged (chain reinit from a freezer),
 		// consider the checkpoint trusted and snapshot it.
-		if number == 0 || (number%p.config.Epoch == 0 && (len(headers) > params.FullImmutabilityThreshold)) {
+		if number == 0 || (number%p.config.Epoch == 0 && (len(headers) > params.FullImmutabilityThreshold/10)) {
 			checkpoint := chain.GetHeaderByNumber(number)
 			if checkpoint != nil {
 				// get checkpoint data
@@ -694,10 +695,12 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 
 				// new snapshot
 				snap = newSnapshot(p.config, p.signatures, number, hash, validators, voteAddrs, p.ethAPI)
-				if err := snap.store(p.db); err != nil {
-					return nil, err
+				if snap.Number%checkpointInterval == 0 { // snapshot will only be loaded when snap.Number%checkpointInterval == 0
+					if err := snap.store(p.db); err != nil {
+						return nil, err
+					}
+					log.Info("Stored checkpoint snapshot to disk", "number", number, "hash", hash)
 				}
-				log.Info("Stored checkpoint snapshot to disk", "number", number, "hash", hash)
 				break
 			}
 		}
@@ -828,6 +831,13 @@ func (p *Parlia) prepareValidators(header *types.Header) error {
 		}
 	} else {
 		header.Extra = append(header.Extra, byte(len(newValidators)))
+		if p.chainConfig.IsOnLuban(header.Number) {
+			voteAddressMap = make(map[common.Address]*types.BLSPublicKey, len(newValidators))
+			var zeroBlsKey types.BLSPublicKey
+			for _, validator := range newValidators {
+				voteAddressMap[validator] = &zeroBlsKey
+			}
+		}
 		for _, validator := range newValidators {
 			header.Extra = append(header.Extra, validator.Bytes()...)
 			header.Extra = append(header.Extra, voteAddressMap[validator].Bytes()...)
@@ -989,6 +999,13 @@ func (p *Parlia) verifyValidators(header *types.Header) error {
 			return errMismatchingEpochValidators
 		}
 		validatorsBytes = make([]byte, validatorsNumber*validatorBytesLength)
+		if p.chainConfig.IsOnLuban(header.Number) {
+			voteAddressMap = make(map[common.Address]*types.BLSPublicKey, len(newValidators))
+			var zeroBlsKey types.BLSPublicKey
+			for _, validator := range newValidators {
+				voteAddressMap[validator] = &zeroBlsKey
+			}
+		}
 		for i, validator := range newValidators {
 			copy(validatorsBytes[i*validatorBytesLength:], validator.Bytes())
 			copy(validatorsBytes[i*validatorBytesLength+common.AddressLength:], voteAddressMap[validator].Bytes())
@@ -1571,7 +1588,8 @@ func (p *Parlia) distributeIncoming(val common.Address, state *state.StateDB, he
 	state.SetBalance(consensus.SystemAddress, big.NewInt(0))
 	state.AddBalance(coinbase, balance)
 
-	doDistributeSysReward := state.GetBalance(common.HexToAddress(systemcontracts.SystemRewardContract)).Cmp(maxSystemBalance) < 0
+	doDistributeSysReward := !p.chainConfig.IsKepler(header.Number, header.Time) &&
+		state.GetBalance(common.HexToAddress(systemcontracts.SystemRewardContract)).Cmp(maxSystemBalance) < 0
 	if doDistributeSysReward {
 		var rewards = new(big.Int)
 		rewards = rewards.Rsh(balance, systemRewardPercent)

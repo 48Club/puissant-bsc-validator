@@ -700,7 +700,7 @@ func (w *worker) prepareWork(genParams *generateParams) (*core.MinerEnvironment,
 	}
 
 	// Handle upgrade build-in system contract code
-	systemcontracts.UpgradeBuildInSystemContract(w.chainConfig, header.Number, env.State)
+	systemcontracts.UpgradeBuildInSystemContract(w.chainConfig, header.Number, parent.Time, header.Time, env.State)
 
 	return env, nil
 }
