@@ -1165,11 +1165,6 @@ func (p *Parlia) Finalize(chain consensus.ChainHeaderReader, header *types.Heade
 func (p *Parlia) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *types.Header, state *state.StateDB,
 	txs []*types.Transaction, uncles []*types.Header, receipts []*types.Receipt, _ []*types.Withdrawal) (*types.Block, []*types.Receipt, error) {
 
-	start := time.Now()
-	defer func(start time.Time) {
-		log.Info("FinalizeAndAssemble Total", "runtime", time.Since(start), "number", header.Number.Uint64())
-	}(start)
-
 	// No block rewards in PoA, so the state remains as is and uncles are dropped
 	cx := chainContext{Chain: chain, parlia: p}
 	if txs == nil {
@@ -1228,8 +1223,6 @@ func (p *Parlia) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *
 	}
 	header.UncleHash = types.CalcUncleHash(nil)
 
-	log.Info("FinalizeAndAssemble Step 1", "runtime", time.Since(start), "number", header.Number.Uint64())
-
 	var blk *types.Block
 	var rootHash common.Hash
 	wg := sync.WaitGroup{}
@@ -1243,7 +1236,6 @@ func (p *Parlia) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *
 		wg.Done()
 	}()
 	wg.Wait()
-	log.Info("FinalizeAndAssemble Step 2", "runtime", time.Since(start), "number", header.Number.Uint64())
 
 	blk.SetRoot(rootHash)
 	// Assemble and return the final block for sealing
@@ -1502,10 +1494,6 @@ func CalcDifficulty(snap *Snapshot, signer common.Address) *big.Int {
 // SealHash returns the hash of a block without vote attestation prior to it being sealed.
 // So it's not the real hash of a block, just used as unique id to distinguish task
 func (p *Parlia) SealHash(header *types.Header) (hash common.Hash) {
-	defer func(start time.Time) {
-		log.Info("SealHash", "runtime", time.Since(start), "number", header.Number.Uint64())
-	}(time.Now())
-
 	hasher := sha3.NewLegacyKeccak256()
 	encodeSigHeaderWithoutVoteAttestation(hasher, header, p.chainConfig.ChainID)
 	hasher.Sum(hash[:0])
