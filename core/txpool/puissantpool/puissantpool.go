@@ -303,8 +303,16 @@ func (pool *PuissantPool) reset(oldHead, newHead *types.Header) {
 	pool.pendingNonces = newNoncer(statedb)
 }
 
-func (pool *PuissantPool) PendingPuissantBundles(blockTimestamp uint64) types.PuissantBundles {
-	var poolPx types.PuissantBundles
+func (pool *PuissantPool) PendingPuissantBundles(blockTimestamp uint64, publicTxsCount int) types.PuissantBundles {
+	var (
+		poolPx    types.PuissantBundles
+		maxBundle = pool.config.MaxPuissantPreBlock - (publicTxsCount-300)/20
+	)
+	if maxBundle <= 0 {
+		return nil
+	} else if maxBundle > pool.config.MaxPuissantPreBlock {
+		maxBundle = pool.config.MaxPuissantPreBlock
+	}
 
 	pool.mu.Lock()
 	defer pool.mu.Unlock()
@@ -318,10 +326,10 @@ func (pool *PuissantPool) PendingPuissantBundles(blockTimestamp uint64) types.Pu
 	}
 	sort.Sort(poolPx)
 
-	if len(poolPx) <= pool.config.MaxPuissantPreBlock {
+	if len(poolPx) <= maxBundle {
 		return poolPx
 	}
-	return poolPx[:pool.config.MaxPuissantPreBlock]
+	return poolPx[:maxBundle]
 }
 
 func (pool *PuissantPool) DeletePuissantBundles(set mapset.Set[types.PuissantID]) {

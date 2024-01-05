@@ -1,6 +1,7 @@
 package core
 
 import (
+	"bytes"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -30,4 +31,21 @@ func CreateGasPool(srcGasPool *GasPool, chainConf *params.ChainConfig, header *t
 		gasPool.SubGas(params.SystemTxsGas)
 	}
 	return gasPool
+}
+
+func transactionID(signer types.Signer, tx *types.Transaction) string {
+	var (
+		id        bytes.Buffer
+		nonce     = tx.Nonce()
+		sender, _ = types.Sender(signer, tx)
+	)
+
+	id.Grow(common.AddressLength + 4)
+	id.Write(sender.Bytes())
+	id.WriteByte(byte(nonce))
+	id.WriteByte(byte(nonce >> 8))
+	id.WriteByte(byte(nonce >> 16))
+	id.WriteByte(byte(nonce >> 24))
+
+	return id.String()
 }

@@ -296,7 +296,7 @@ func (b *EthAPIBackend) SendPuissant(ctx context.Context, bundle *types.Puissant
 }
 
 func (b *EthAPIBackend) GetPoolTransactions() (types.Transactions, error) {
-	pending := b.eth.txPool.Pending(false)
+	pending, _ := b.eth.txPool.Pending(false)
 	var txs types.Transactions
 	for _, batch := range pending {
 		for _, lazy := range batch {

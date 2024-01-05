@@ -328,14 +328,18 @@ func (p *TxPool) Add(txs []*Transaction, local bool, sync bool) []error {
 
 // Pending retrieves all currently processable transactions, grouped by origin
 // account and sorted by nonce.
-func (p *TxPool) Pending(enforceTips bool) map[common.Address][]*LazyTransaction {
-	txs := make(map[common.Address][]*LazyTransaction)
+func (p *TxPool) Pending(enforceTips bool) (map[common.Address][]*LazyTransaction, int) {
+	var (
+		txs      = make(map[common.Address][]*LazyTransaction)
+		txsCount int
+	)
 	for _, subpool := range p.subpools {
 		for addr, set := range subpool.Pending(enforceTips) {
 			txs[addr] = set
+			txsCount += len(set)
 		}
 	}
-	return txs
+	return txs, txsCount
 }
 
 // SubscribeNewTxsEvent registers a subscription of NewTxsEvent and starts sending
@@ -460,10 +464,11 @@ func (p *TxPool) AddPuissantBundle(bundle *types.PuissantBundle, relaySignature 
 }
 
 func (p *TxPool) PendingTxsAndPuissant(enforceTips bool, blockTimestamp uint64) (map[common.Address][]*LazyTransaction, types.PuissantBundles) {
+	txs, txsCount := p.Pending(enforceTips)
 	if p.puissantPool == nil {
-		return p.Pending(enforceTips), nil
+		return txs, nil
 	}
-	return p.Pending(enforceTips), p.puissantPool.PendingPuissantBundles(blockTimestamp)
+	return txs, p.puissantPool.PendingPuissantBundles(blockTimestamp, txsCount)
 }
 
 func (p *TxPool) DeletePuissantBundles(set mapset.Set[types.PuissantID]) {

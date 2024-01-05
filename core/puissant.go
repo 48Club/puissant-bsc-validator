@@ -1,7 +1,6 @@
 package core
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -143,7 +142,7 @@ func (p *puissantRuntime) commitTransaction(round int, tx *types.Transaction) {
 	}
 
 	if err != nil {
-		//log.Warn("puissant-tx-failed", "seq", pSeq, "tx", bundleTxSeq, "err", err)
+		log.Warn("puissant-tx-failed", "bid", theBundle.ID().String(), "txSeq", bundleTxSeq, "err", err)
 
 		theBundle.UpdateTransactionStatus(round, tx.Hash(), 0, types.PuiTransactionStatusRevert, err)
 
@@ -154,7 +153,7 @@ func (p *puissantRuntime) commitTransaction(round int, tx *types.Transaction) {
 		p.resetPackingBundles(round)
 
 	} else {
-		//log.Info("puissant-tx-pass", "seq", pSeq, "tx", bundleTxSeq)
+		log.Info("puissant-tx-pass", "bid", theBundle.ID().String(), "txSeq", bundleTxSeq)
 
 		theBundle.UpdateTransactionStatus(round, tx.Hash(), txReceipt.GasUsed, types.PuiTransactionStatusOk, nil)
 
@@ -179,7 +178,7 @@ func (p *puissantRuntime) resetPackingBundles(round int) {
 		}
 
 		for _, tx := range bundle.Txs() {
-			if included.Contains(txUniqueID(p.env.Signer, tx)) {
+			if included.Contains(transactionID(p.env.Signer, tx)) {
 				conflict = true
 				bundle.UpdateTransactionStatus(
 					round,
@@ -193,29 +192,12 @@ func (p *puissantRuntime) resetPackingBundles(round int) {
 		}
 		if !conflict {
 			for _, tx := range bundle.Txs() {
-				included.Add(txUniqueID(p.env.Signer, tx))
+				included.Add(transactionID(p.env.Signer, tx))
 			}
 			enabled = append(enabled, bundle.ID())
 		}
 	}
 	p.env.PuissantTxQueue.ResetEnable(enabled)
-}
-
-func txUniqueID(signer types.Signer, tx *types.Transaction) string {
-	var (
-		id        bytes.Buffer
-		nonce     = tx.Nonce()
-		sender, _ = types.Sender(signer, tx)
-	)
-
-	id.Grow(common.AddressLength + 4)
-	id.Write(sender.Bytes())
-	id.WriteByte(byte(nonce))
-	id.WriteByte(byte(nonce >> 8))
-	id.WriteByte(byte(nonce >> 16))
-	id.WriteByte(byte(nonce >> 24))
-
-	return id.String()
 }
 
 type envData struct {

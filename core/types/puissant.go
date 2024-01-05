@@ -3,6 +3,7 @@ package types
 import (
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/log"
 	"math/big"
 	"sort"
 )
@@ -165,6 +166,9 @@ func (p PuissantBundles) Swap(i, j int) {
 func (p PuissantBundles) PreparePacking(blockNumber uint64, round int) {
 	for _, bundle := range p {
 		bundle.PreparePacking(blockNumber, round)
+		for index, tx := range bundle.Txs() {
+			log.Info("puissant-tx-prepare", "hash", tx.Hash().String(), "bid", bundle.ID().String(), "txSeq", index)
+		}
 	}
 }
 

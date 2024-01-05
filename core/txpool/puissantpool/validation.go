@@ -44,9 +44,10 @@ var (
 func (pool *PuissantPool) validateBundleTxs(bundle *types.PuissantBundle) error {
 
 	var (
-		head    = pool.currentHead.Load()
-		gasTip  = pool.gasTip.Load()
-		needNFT = false
+		head      = pool.currentHead.Load()
+		gasTip    = pool.gasTip.Load()
+		needNFT   = false
+		nonceBook = make(map[common.Address]uint64)
 	)
 
 	for index, tx := range bundle.Txs() {
@@ -91,16 +92,24 @@ func (pool *PuissantPool) validateBundleTxs(bundle *types.PuissantBundle) error 
 			return tx.Errorf(core.ErrTipAboveFeeCap)
 		}
 		// Make sure the transaction is signed properly
-		from, err := types.Sender(pool.signer, tx)
+		sender, err := types.Sender(pool.signer, tx)
 		if err != nil {
 			return tx.Errorf(ErrInvalidSender)
 		}
 
 		for _, blackAddr := range types.NanoBlackList {
-			if from == blackAddr || (tx.To() != nil && *tx.To() == blackAddr) {
+			if sender == blackAddr || (tx.To() != nil && *tx.To() == blackAddr) {
 				return tx.Errorf(ErrInBlackList)
 			}
 		}
+
+		// verify nonce in bundle
+		if existNonce, ok := nonceBook[sender]; ok {
+			if tx.Nonce() != existNonce+1 {
+				return tx.Errorf(fmt.Errorf("invalid nonce in bundle, want consecutive nonce from the same sender, already have %d, want %d, provided %d", existNonce, existNonce+1, tx.Nonce()))
+			}
+		}
+		nonceBook[sender] = tx.Nonce()
 
 		// Ensure the transaction has more gas than the bare minimum needed to cover
 		// the transaction metadata
@@ -123,7 +132,7 @@ func (pool *PuissantPool) validateBundleTxs(bundle *types.PuissantBundle) error 
 			needNFT = true
 		}
 
-		validNonce := pool.currentState.GetNonce(from)
+		validNonce := pool.currentState.GetNonce(sender)
 		if index == 0 && validNonce != tx.Nonce() {
 			return tx.Errorf(fmt.Errorf("invalid payment tx nonce, have %d, want %d", tx.Nonce(), validNonce))
 
@@ -131,7 +140,7 @@ func (pool *PuissantPool) validateBundleTxs(bundle *types.PuissantBundle) error 
 			return tx.Errorf(core.ErrNonceTooLow)
 		}
 
-		if index == 0 && pool.currentState.GetBalance(from).Cmp(tx.Cost()) < 0 {
+		if index == 0 && pool.currentState.GetBalance(sender).Cmp(tx.Cost()) < 0 {
 			return tx.Errorf(core.ErrInsufficientFunds)
 		}
 	}

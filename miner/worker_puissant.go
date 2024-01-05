@@ -128,7 +128,7 @@ LOOP:
 		if isInturn && round != 0 {
 			pendingTxs, pendingBundles = w.eth.TxPool().PendingTxsAndPuissant(false, work.Header.Time)
 		} else {
-			pendingTxs = w.eth.TxPool().Pending(false)
+			pendingTxs, _ = w.eth.TxPool().Pending(false)
 		}
 
 		var pendingPubPool = make(map[common.Address][]*types.Transaction, len(pendingTxs))
