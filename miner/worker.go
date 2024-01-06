@@ -137,6 +137,8 @@ type worker struct {
 
 	wg sync.WaitGroup
 
+	current *core.MinerEnvironment // An environment for current running cycle.
+
 	mu       sync.RWMutex // The lock used to protect the coinbase and extra fields
 	coinbase common.Address
 	extra    []byte
@@ -445,6 +447,11 @@ func (w *worker) newWorkLoop(recommit time.Duration) {
 func (w *worker) mainLoop() {
 	defer w.wg.Done()
 	defer w.chainHeadSub.Unsubscribe()
+	defer func() {
+		if w.current != nil {
+			w.current.Discard()
+		}
+	}()
 
 	for {
 		select {
@@ -693,7 +700,7 @@ func (w *worker) prepareWork(genParams *generateParams) (*core.MinerEnvironment,
 	// Could potentially happen if starting to mine in an odd state.
 	// Note genParams.coinbase can be different with header.Coinbase
 	// since clique algorithm can modify the coinbase field in header.
-	env, err := w.makeEnv(parent, header, genParams.coinbase)
+	env, err := w.makeEnv(parent, header, genParams.coinbase, genParams.prevWork)
 	if err != nil {
 		log.Error("Failed to create sealing context", "err", err)
 		return nil, err

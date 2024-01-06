@@ -49,7 +49,7 @@ func (env *MinerEnvironment) Copy() *MinerEnvironment {
 // the go-routine leak can happen.
 func (env *MinerEnvironment) Discard() {
 	if env.State != nil {
-		//env.State.StopPrefetcher()
+		env.State.StopPrefetcher()
 	}
 }
 

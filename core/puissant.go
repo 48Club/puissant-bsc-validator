@@ -232,7 +232,7 @@ func (pc *snapshotSet) revert(bID types.PuissantID, currEnv *MinerEnvironment) {
 
 	if currEnv.TxCount != load.storeEnv.TxCount {
 		// should reload work env
-		//load.storeEnv.State.TransferPrefetcher(currEnv.State)
+		load.storeEnv.State.TransferPrefetcher(currEnv.State)
 		*currEnv = *load.storeEnv
 	}
 
