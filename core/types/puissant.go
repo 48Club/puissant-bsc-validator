@@ -166,9 +166,6 @@ func (p PuissantBundles) Swap(i, j int) {
 func (p PuissantBundles) PreparePacking(blockNumber uint64, round int) {
 	for _, bundle := range p {
 		bundle.PreparePacking(blockNumber, round)
-		for index, tx := range bundle.Txs() {
-			log.Info("puissant-tx-prepare", "hash", tx.Hash().String(), "bid", bundle.ID().String(), "txSeq", index)
-		}
 	}
 }
 
@@ -238,6 +235,13 @@ func NewTransactionsPuissant(signer Signer, txs map[common.Address][]*Transactio
 	}
 
 	sort.Sort(&headsAndBundleTxs)
+
+	for _, tx := range headsAndBundleTxs {
+		if bundle, txSeq := tx.Bundle(); bundle != nil {
+			log.Info("ptx-queue", "hash", tx.Hash().String(), "bid", bundle.ID().String(), "txSeq", txSeq, "gp", tx.GasTipCap())
+		}
+	}
+
 	return &TransactionsPuissant{
 		enabled:            mapset.NewThreadUnsafeSet[PuissantID](),
 		txs:                txs,
