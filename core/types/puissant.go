@@ -6,9 +6,12 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"math/big"
 	"sort"
+	"time"
 )
 
 type PuissantBundle struct {
+	receiveAt time.Time
+
 	id         PuissantID
 	txs        Transactions
 	expireAt   uint64
@@ -26,6 +29,8 @@ func NewPuissantBundle(txs Transactions, revertible mapset.Set[common.Hash], max
 	}
 
 	theBundle := &PuissantBundle{
+		receiveAt: time.Now(),
+
 		id:         genPuissantID(txs, revertible, maxTS),
 		txs:        txs,
 		expireAt:   maxTS,
@@ -129,12 +134,12 @@ func (pp *PuissantBundle) TxCount() int {
 	return len(pp.txs)
 }
 
-func (pp *PuissantBundle) HasHigherBidPriceThan(with *PuissantBundle) bool {
-	return pp.bidPrice.Cmp(with.bidPrice) > 0
-}
-
-func (pp *PuissantBundle) HasHigherBidPriceIntCmp(with *big.Int) bool {
-	return pp.bidPrice.Cmp(with) > 0
+func (pp *PuissantBundle) HasHigherPriorityThan(with *PuissantBundle) bool {
+	cmp := pp.bidPrice.Cmp(with.bidPrice)
+	if cmp == 0 {
+		return pp.receiveAt.Before(with.receiveAt)
+	}
+	return cmp > 0
 }
 
 func (pp *PuissantBundle) ReplacedByNewPuissant(np *PuissantBundle, priceBump uint64) bool {
@@ -156,7 +161,7 @@ func (p PuissantBundles) Len() int {
 }
 
 func (p PuissantBundles) Less(i, j int) bool {
-	return p[i].HasHigherBidPriceThan(p[j])
+	return p[i].HasHigherPriorityThan(p[j])
 }
 
 func (p PuissantBundles) Swap(i, j int) {
@@ -182,7 +187,7 @@ func (s puissantTxQueue) Less(i, j int) bool {
 		if txI.bundle.ID() == txJ.bundle.ID() {
 			return txI.bundleTxIndex < txJ.bundleTxIndex
 		}
-		return txI.bundle.HasHigherBidPriceThan(txJ.bundle)
+		return txI.bundle.HasHigherPriorityThan(txJ.bundle)
 	}
 
 	cmp := s[i].GasTipCap().Cmp(s[j].GasTipCap())
