@@ -687,10 +687,10 @@ func (w *worker) prepareWork(genParams *generateParams) (*core.MinerEnvironment,
 	// Set baseFee and GasLimit if we are on an EIP-1559 chain
 	if w.chainConfig.IsLondon(header.Number) {
 		header.BaseFee = eip1559.CalcBaseFee(w.chainConfig, parent)
-		// if !w.chainConfig.IsLondon(parent.Number) {
-		// 	parentGasLimit := parent.GasLimit * w.chainConfig.ElasticityMultiplier()
-		// 	header.GasLimit = core.CalcGasLimit(parentGasLimit, w.config.GasCeil)
-		// }
+		if w.chainConfig.Parlia == nil && !w.chainConfig.IsLondon(parent.Number) {
+			parentGasLimit := parent.GasLimit * w.chainConfig.ElasticityMultiplier()
+			header.GasLimit = core.CalcGasLimit(parentGasLimit, w.config.GasCeil)
+		}
 	}
 	// Run the consensus preparation with the default or customized consensus engine.
 	if err := w.engine.Prepare(w.chain, header); err != nil {
@@ -706,8 +706,10 @@ func (w *worker) prepareWork(genParams *generateParams) (*core.MinerEnvironment,
 		return nil, err
 	}
 
-	// Handle upgrade build-in system contract code
-	systemcontracts.UpgradeBuildInSystemContract(w.chainConfig, header.Number, parent.Time, header.Time, env.State)
+	if !w.chainConfig.IsFeynman(header.Number, header.Time) {
+		// Handle upgrade build-in system contract code
+		systemcontracts.UpgradeBuildInSystemContract(w.chainConfig, header.Number, parent.Time, header.Time, env.State)
+	}
 
 	return env, nil
 }

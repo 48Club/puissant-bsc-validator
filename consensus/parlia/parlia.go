@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
 	"math"
 	"math/big"
 	"math/rand"
@@ -91,6 +90,11 @@ var (
 		common.HexToAddress(systemcontracts.TokenHubContract):           true,
 		common.HexToAddress(systemcontracts.RelayerIncentivizeContract): true,
 		common.HexToAddress(systemcontracts.CrossChainContract):         true,
+		common.HexToAddress(systemcontracts.StakeHubContract):           true,
+		common.HexToAddress(systemcontracts.GovernorContract):           true,
+		common.HexToAddress(systemcontracts.GovTokenContract):           true,
+		common.HexToAddress(systemcontracts.TimelockContract):           true,
+		common.HexToAddress(systemcontracts.TokenRecoverPortalContract): true,
 	}
 )
 
@@ -180,7 +184,7 @@ func ecrecover(header *types.Header, sigCache *lru.ARCCache, chainId *big.Int) (
 	signature := header.Extra[len(header.Extra)-extraSeal:]
 
 	// Recover the public key and the Ethereum address
-	pubkey, err := crypto.Ecrecover(SealHash(header, chainId).Bytes(), signature)
+	pubkey, err := crypto.Ecrecover(types.SealHash(header, chainId).Bytes(), signature)
 	if err != nil {
 		return common.Address{}, err
 	}
@@ -200,7 +204,7 @@ func ecrecover(header *types.Header, sigCache *lru.ARCCache, chainId *big.Int) (
 // or not), which could be abused to produce different hashes for the same header.
 func ParliaRLP(header *types.Header, chainId *big.Int) []byte {
 	b := new(bytes.Buffer)
-	encodeSigHeader(b, header, chainId)
+	types.EncodeSigHeader(b, header, chainId)
 	return b.Bytes()
 }
 
@@ -227,6 +231,7 @@ type Parlia struct {
 	validatorSetABIBeforeLuban abi.ABI
 	validatorSetABI            abi.ABI
 	slashABI                   abi.ABI
+	stakeHubABI                abi.ABI
 
 	// The fields below are for testing only
 	fakeDiff bool // Skip difficulty verifications
@@ -269,6 +274,10 @@ func New(
 	if err != nil {
 		panic(err)
 	}
+	stABI, err := abi.JSON(strings.NewReader(stakeABI))
+	if err != nil {
+		panic(err)
+	}
 	c := &Parlia{
 		chainConfig:                chainConfig,
 		config:                     parliaConfig,
@@ -280,6 +289,7 @@ func New(
 		validatorSetABIBeforeLuban: vABIBeforeLuban,
 		validatorSetABI:            vABI,
 		slashABI:                   sABI,
+		stakeHubABI:                stABI,
 		signer:                     types.LatestSigner(chainConfig),
 	}
 
@@ -447,7 +457,11 @@ func (p *Parlia) verifyVoteAttestation(chain consensus.ChainHeaderReader, header
 	// The source block should be the highest justified block.
 	sourceNumber := attestation.Data.SourceNumber
 	sourceHash := attestation.Data.SourceHash
-	justifiedBlockNumber, justifiedBlockHash, err := p.GetJustifiedNumberAndHash(chain, parent)
+	headers := []*types.Header{parent}
+	if len(parents) > 0 {
+		headers = parents
+	}
+	justifiedBlockNumber, justifiedBlockHash, err := p.GetJustifiedNumberAndHash(chain, headers)
 	if err != nil {
 		return fmt.Errorf("unexpected error when getting the highest justified number and hash")
 	}
@@ -871,7 +885,7 @@ func (p *Parlia) assembleVoteAttestation(chain consensus.ChainHeaderReader, head
 
 	// Prepare vote attestation
 	// Prepare vote data
-	justifiedBlockNumber, justifiedBlockHash, err := p.GetJustifiedNumberAndHash(chain, parent)
+	justifiedBlockNumber, justifiedBlockHash, err := p.GetJustifiedNumberAndHash(chain, []*types.Header{parent})
 	if err != nil {
 		return fmt.Errorf("unexpected error when getting the highest justified number and hash")
 	}
@@ -904,7 +918,7 @@ func (p *Parlia) assembleVoteAttestation(chain consensus.ChainHeaderReader, head
 	// Prepare vote address bitset.
 	for _, valInfo := range snap.Validators {
 		if _, ok := voteAddrSet[valInfo.VoteAddress]; ok {
-			attestation.VoteAddressSet |= 1 << (valInfo.Index - 1) //Index is offset by 1
+			attestation.VoteAddressSet |= 1 << (valInfo.Index - 1) // Index is offset by 1
 		}
 	}
 	validatorsBitSet := bitset.From([]uint64{uint64(attestation.VoteAddressSet)})
@@ -1113,6 +1127,22 @@ func (p *Parlia) Finalize(chain consensus.ChainHeaderReader, header *types.Heade
 
 	cx := chainContext{Chain: chain, parlia: p}
 
+	parent := chain.GetHeaderByHash(header.ParentHash)
+	if parent == nil {
+		return errors.New("parent not found")
+	}
+
+	if p.chainConfig.IsFeynman(header.Number, header.Time) {
+		systemcontracts.UpgradeBuildInSystemContract(p.chainConfig, header.Number, parent.Time, header.Time, state)
+	}
+
+	if p.chainConfig.IsOnFeynman(header.Number, parent.Time, header.Time) {
+		err := p.initializeFeynmanContract(state, header, cx, txs, receipts, systemTxs, usedGas, false)
+		if err != nil {
+			log.Error("init feynman contract failed", "error", err)
+		}
+	}
+
 	// No block rewards in PoA, so the state remains as is and uncles are dropped
 	if header.Number.Cmp(common.Big1) == 0 {
 		err := p.initContract(state, header, cx, txs, receipts, systemTxs, usedGas, false)
@@ -1154,6 +1184,17 @@ func (p *Parlia) Finalize(chain consensus.ChainHeaderReader, header *types.Heade
 			return err
 		}
 	}
+
+	// update validators every day
+	if p.chainConfig.IsFeynman(header.Number, header.Time) && isBreatheBlock(parent.Time, header.Time) {
+		// we should avoid update validators in the Feynman upgrade block
+		if !p.chainConfig.IsOnFeynman(header.Number, parent.Time, header.Time) {
+			if err := p.updateValidatorSetV2(state, header, cx, txs, receipts, systemTxs, usedGas, false); err != nil {
+				return err
+			}
+		}
+	}
+
 	if len(*systemTxs) > 0 {
 		return errors.New("the length of systemTxs do not match")
 	}
@@ -1173,6 +1214,23 @@ func (p *Parlia) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *
 	if receipts == nil {
 		receipts = make([]*types.Receipt, 0)
 	}
+
+	parent := chain.GetHeaderByHash(header.ParentHash)
+	if parent == nil {
+		return nil, nil, errors.New("parent not found")
+	}
+
+	if p.chainConfig.IsFeynman(header.Number, header.Time) {
+		systemcontracts.UpgradeBuildInSystemContract(p.chainConfig, header.Number, parent.Time, header.Time, state)
+	}
+
+	if p.chainConfig.IsOnFeynman(header.Number, parent.Time, header.Time) {
+		err := p.initializeFeynmanContract(state, header, cx, &txs, &receipts, nil, &header.GasUsed, true)
+		if err != nil {
+			log.Error("init feynman contract failed", "error", err)
+		}
+	}
+
 	if header.Number.Cmp(common.Big1) == 0 {
 		err := p.initContract(state, header, cx, &txs, &receipts, nil, &header.GasUsed, true)
 		if err != nil {
@@ -1214,6 +1272,16 @@ func (p *Parlia) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *
 	if p.chainConfig.IsPlato(header.Number) {
 		if err := p.distributeFinalityReward(chain, state, header, cx, &txs, &receipts, nil, &header.GasUsed, true); err != nil {
 			return nil, nil, err
+		}
+	}
+
+	// update validators every day
+	if p.chainConfig.IsFeynman(header.Number, header.Time) && isBreatheBlock(parent.Time, header.Time) {
+		// we should avoid update validators in the Feynman upgrade block
+		if !p.chainConfig.IsOnFeynman(header.Number, parent.Time, header.Time) {
+			if err := p.updateValidatorSetV2(state, header, cx, &txs, &receipts, nil, &header.GasUsed, true); err != nil {
+				return nil, nil, err
+			}
 		}
 	}
 
@@ -1269,7 +1337,7 @@ func (p *Parlia) VerifyVote(chain consensus.ChainHeaderReader, vote *types.VoteE
 		return fmt.Errorf("target number mismatch")
 	}
 
-	justifiedBlockNumber, justifiedBlockHash, err := p.GetJustifiedNumberAndHash(chain, header)
+	justifiedBlockNumber, justifiedBlockHash, err := p.GetJustifiedNumberAndHash(chain, []*types.Header{header})
 	if err != nil {
 		log.Error("failed to get the highest justified number and hash", "headerNumber", header.Number, "headerHash", header.Hash())
 		return fmt.Errorf("unexpected error when getting the highest justified number and hash")
@@ -1421,7 +1489,7 @@ func (p *Parlia) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 		select {
 		case results <- block.WithSeal(header):
 		default:
-			log.Warn("Sealing result is not read by miner", "sealhash", SealHash(header, p.chainConfig.ChainID))
+			log.Warn("Sealing result is not read by miner", "sealhash", types.SealHash(header, p.chainConfig.ChainID))
 		}
 	}()
 
@@ -1495,7 +1563,7 @@ func CalcDifficulty(snap *Snapshot, signer common.Address) *big.Int {
 // So it's not the real hash of a block, just used as unique id to distinguish task
 func (p *Parlia) SealHash(header *types.Header) (hash common.Hash) {
 	hasher := sha3.NewLegacyKeccak256()
-	encodeSigHeaderWithoutVoteAttestation(hasher, header, p.chainConfig.ChainID)
+	types.EncodeSigHeaderWithoutVoteAttestation(hasher, header, p.chainConfig.ChainID)
 	hasher.Sum(hash[:0])
 	return hash
 }
@@ -1553,19 +1621,18 @@ func (p *Parlia) getCurrentValidators(blockHash common.Hash, blockNum *big.Int) 
 
 	var valSet []common.Address
 	var voteAddrSet []types.BLSPublicKey
-
 	if err := p.validatorSetABI.UnpackIntoInterface(&[]interface{}{&valSet, &voteAddrSet}, method, result); err != nil {
 		return nil, nil, err
 	}
 
-	voteAddrmap := make(map[common.Address]*types.BLSPublicKey, len(valSet))
+	voteAddrMap := make(map[common.Address]*types.BLSPublicKey, len(valSet))
 	for i := 0; i < len(valSet); i++ {
-		voteAddrmap[valSet[i]] = &(voteAddrSet)[i]
+		voteAddrMap[valSet[i]] = &(voteAddrSet)[i]
 	}
-	return valSet, voteAddrmap, nil
+	return valSet, voteAddrMap, nil
 }
 
-// slash spoiled validators
+// distributeIncoming distributes system incoming of the block
 func (p *Parlia) distributeIncoming(val common.Address, state *state.StateDB, header *types.Header, chain core.ChainContext,
 	txs *[]*types.Transaction, receipts *[]*types.Receipt, receivedTxs *[]*types.Transaction, usedGas *uint64, mining bool) error {
 	coinbase := header.Coinbase
@@ -1579,7 +1646,7 @@ func (p *Parlia) distributeIncoming(val common.Address, state *state.StateDB, he
 	doDistributeSysReward := !p.chainConfig.IsKepler(header.Number, header.Time) &&
 		state.GetBalance(common.HexToAddress(systemcontracts.SystemRewardContract)).Cmp(maxSystemBalance) < 0
 	if doDistributeSysReward {
-		var rewards = new(big.Int)
+		rewards := new(big.Int)
 		rewards = rewards.Rsh(balance, systemRewardPercent)
 		if rewards.Cmp(common.Big0) > 0 {
 			err := p.distributeToSystem(rewards, state, header, chain, txs, receipts, receivedTxs, usedGas, mining)
@@ -1655,7 +1722,7 @@ func (p *Parlia) distributeToSystem(amount *big.Int, state *state.StateDB, heade
 	return p.applyTransaction(msg, state, header, chain, txs, receipts, receivedTxs, usedGas, mining)
 }
 
-// slash spoiled validators
+// distributeToValidator deposits validator reward to validator contract
 func (p *Parlia) distributeToValidator(amount *big.Int, validator common.Address,
 	state *state.StateDB, header *types.Header, chain core.ChainContext,
 	txs *[]*types.Transaction, receipts *[]*types.Receipt, receivedTxs *[]*types.Transaction, usedGas *uint64, mining bool) error {
@@ -1750,24 +1817,25 @@ func (p *Parlia) applyTransaction(
 	receipt.BlockNumber = header.Number
 	receipt.TransactionIndex = uint(state.TxIndex())
 	*receipts = append(*receipts, receipt)
-	state.SetNonce(msg.From(), nonce+1)
 	return nil
 }
 
-// GetJustifiedNumberAndHash returns the highest justified block's number and hash on the branch including and before `header`
-func (p *Parlia) GetJustifiedNumberAndHash(chain consensus.ChainHeaderReader, header *types.Header) (uint64, common.Hash, error) {
-	if chain == nil || header == nil {
+// GetJustifiedNumberAndHash retrieves the number and hash of the highest justified block
+// within the branch including `headers` and utilizing the latest element as the head.
+func (p *Parlia) GetJustifiedNumberAndHash(chain consensus.ChainHeaderReader, headers []*types.Header) (uint64, common.Hash, error) {
+	if chain == nil || len(headers) == 0 || headers[len(headers)-1] == nil {
 		return 0, common.Hash{}, fmt.Errorf("illegal chain or header")
 	}
-	snap, err := p.snapshot(chain, header.Number.Uint64(), header.Hash(), nil)
+	head := headers[len(headers)-1]
+	snap, err := p.snapshot(chain, head.Number.Uint64(), head.Hash(), headers)
 	if err != nil {
 		log.Error("Unexpected error when getting snapshot",
-			"error", err, "blockNumber", header.Number.Uint64(), "blockHash", header.Hash())
+			"error", err, "blockNumber", head.Number.Uint64(), "blockHash", head.Hash())
 		return 0, common.Hash{}, err
 	}
 
 	if snap.Attestation == nil {
-		if p.chainConfig.IsLuban(header.Number) {
+		if p.chainConfig.IsLuban(head.Number) {
 			log.Debug("once one attestation generated, attestation of snap would not be nil forever basically")
 		}
 		return 0, chain.GetHeaderByNumber(0).Hash(), nil
@@ -1799,62 +1867,6 @@ func (p *Parlia) GetFinalizedHeader(chain consensus.ChainHeaderReader, header *t
 }
 
 // ===========================     utility function        ==========================
-// SealHash returns the hash of a block prior to it being sealed.
-func SealHash(header *types.Header, chainId *big.Int) (hash common.Hash) {
-	hasher := sha3.NewLegacyKeccak256()
-	encodeSigHeader(hasher, header, chainId)
-	hasher.Sum(hash[:0])
-	return hash
-}
-
-func encodeSigHeader(w io.Writer, header *types.Header, chainId *big.Int) {
-	err := rlp.Encode(w, []interface{}{
-		chainId,
-		header.ParentHash,
-		header.UncleHash,
-		header.Coinbase,
-		header.Root,
-		header.TxHash,
-		header.ReceiptHash,
-		header.Bloom,
-		header.Difficulty,
-		header.Number,
-		header.GasLimit,
-		header.GasUsed,
-		header.Time,
-		header.Extra[:len(header.Extra)-extraSeal], // this will panic if extra is too short, should check before calling encodeSigHeader
-		header.MixDigest,
-		header.Nonce,
-	})
-	if err != nil {
-		panic("can't encode: " + err.Error())
-	}
-}
-
-func encodeSigHeaderWithoutVoteAttestation(w io.Writer, header *types.Header, chainId *big.Int) {
-	err := rlp.Encode(w, []interface{}{
-		chainId,
-		header.ParentHash,
-		header.UncleHash,
-		header.Coinbase,
-		header.Root,
-		header.TxHash,
-		header.ReceiptHash,
-		header.Bloom,
-		header.Difficulty,
-		header.Number,
-		header.GasLimit,
-		header.GasUsed,
-		header.Time,
-		header.Extra[:extraVanity], // this will panic if extra is too short, should check before calling encodeSigHeaderWithoutVoteAttestation
-		header.MixDigest,
-		header.Nonce,
-	})
-	if err != nil {
-		panic("can't encode: " + err.Error())
-	}
-}
-
 func (p *Parlia) backOffTime(snap *Snapshot, header *types.Header, val common.Address) uint64 {
 	if snap.inturn(val) {
 		return 0
@@ -1972,6 +1984,8 @@ func applyMessage(
 	// about the transaction and calling mechanisms.
 	vmenv := vm.NewEVM(context, vm.TxContext{Origin: msg.From(), GasPrice: big.NewInt(0)}, state, chainConfig, vm.Config{})
 	// Apply the transaction to the current state (included in the env)
+	// Increment the nonce for the next transaction
+	state.SetNonce(msg.From(), state.GetNonce(msg.From())+1)
 	ret, returnGas, err := vmenv.Call(
 		vm.AccountRef(msg.From()),
 		*msg.To(),

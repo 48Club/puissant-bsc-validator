@@ -1,4 +1,67 @@
 # Changelog
+
+## v1.3.12
+BUGFIX
+* [\#2305](https://github.com/bnb-chain/bsc/pull/2305) fix: fix the wrong version number
+
+## v1.3.11
+BUGFIX
+* [\#2288](https://github.com/bnb-chain/bsc/pull/2288) fix: add FeynmanFix upgrade for a testnet issue
+
+## v1.3.10
+FEATURE
+* [\#2047](https://github.com/bnb-chain/bsc/pull/2047) feat: add new fork block and precompile contract for BEP294 and BEP299
+
+## v1.3.9
+FEATURE
+* [\#2186](https://github.com/bnb-chain/bsc/pull/2186) log: support maxBackups in config.toml
+
+BUGFIX
+* [\#2160](https://github.com/bnb-chain/bsc/pull/2160) cmd: fix dump cli cannot work in path mode
+* [\#2183](https://github.com/bnb-chain/bsc/pull/2183) p2p: resolved deadlock on p2p server shutdown
+
+IMPROVEMENT
+* [\#2177](https://github.com/bnb-chain/bsc/pull/0000) build(deps): bump github.com/quic-go/quic-go from 0.39.3 to 0.39.4
+* [\#2185](https://github.com/bnb-chain/bsc/pull/2185) consensus/parlia: set nonce before evm run
+* [\#2190](https://github.com/bnb-chain/bsc/pull/2190) fix(legacypool): deprecate already known error
+* [\#2195](https://github.com/bnb-chain/bsc/pull/2195) eth/fetcher: downgrade state tx log
+
+## v1.3.8
+FEATURE
+* [\#2074](https://github.com/bnb-chain/bsc/pull/2074) faucet: new faucet client
+* [\#2082](https://github.com/bnb-chain/bsc/pull/2082) cmd/dbcmd: add inspect trie tool
+* [\#2140](https://github.com/bnb-chain/bsc/pull/2140) eth/fetcher: allow underpriced transactions in after timeout
+* [\#2115](https://github.com/bnb-chain/bsc/pull/2115) p2p: no peer reconnect if explicitly disconnected
+* [\#2128](https://github.com/bnb-chain/bsc/pull/2128) go.mod: upgrade prysm to support built with go@v1.21
+* [\#2151](https://github.com/bnb-chain/bsc/pull/2151) feat: enable NoDial should still dial static nodes
+* [\#2144](https://github.com/bnb-chain/bsc/pull/2144) p2p: reset disconnect set with magic enode ID
+
+BUGFIX
+* [\#2095](https://github.com/bnb-chain/bsc/pull/2095) rpc: fix ns/µs mismatch in metrics
+* [\#2083](https://github.com/bnb-chain/bsc/pull/2083) triedb/pathdb: fix async node buffer diskroot mismatches when journaling
+* [\#2120](https://github.com/bnb-chain/bsc/pull/2120) ethdb/pebble: cap memory table size as maxMemTableSize-1
+* [\#2107](https://github.com/bnb-chain/bsc/pull/2107) cmd/geth: fix parse state scheme
+* [\#2121](https://github.com/bnb-chain/bsc/pull/2121) parlia: fix verifyVoteAttestation when verify a batch of headers
+* [\#2132](https://github.com/bnb-chain/bsc/pull/2132) core: fix systemcontracts.GenesisHash when run bsc firstly without init
+* [\#2155](https://github.com/bnb-chain/bsc/pull/2155) cmd, core: resolve scheme from a read-write database and refactor resolveChainFreezerDir func
+
+IMPROVEMENT
+* [\#2099](https://github.com/bnb-chain/bsc/pull/2099) params/config: remove useless toml tag for hardforks
+* [\#2100](https://github.com/bnb-chain/bsc/pull/2100) core/genesis: support chapel to run without geth init
+* [\#2101](https://github.com/bnb-chain/bsc/pull/2101) core: add metrics for bad block
+* [\#2109](https://github.com/bnb-chain/bsc/pull/2109) cmd/geth: tidy flags for geth command
+* [\#1953](https://github.com/bnb-chain/bsc/pull/1953) build(deps): bump github.com/docker/docker
+* [\#2086](https://github.com/bnb-chain/bsc/pull/2086) build(deps): bump golang.org/x/crypto from 0.12.0 to 0.17.0
+* [\#2106](https://github.com/bnb-chain/bsc/pull/2106) params: use rialto to test builtin network logic
+* [\#2098](https://github.com/bnb-chain/bsc/pull/2098) cmd, les, tests: remove light client code
+* [\#2114](https://github.com/bnb-chain/bsc/pull/2114) p2p: add serve metrics
+* [\#2123](https://github.com/bnb-chain/bsc/pull/2123) p2p, eth: improve logs
+* [\#2116](https://github.com/bnb-chain/bsc/pull/2116) tests: revive evm test cases
+* [\#2161](https://github.com/bnb-chain/bsc/pull/2161) code: remove IsEuler check from worker.go
+* [\#2167](https://github.com/bnb-chain/bsc/pull/2167) improve: increase SystemTxsGas from 1,500,000 to 5,000,000
+* [\#2172](https://github.com/bnb-chain/bsc/pull/2172) improve: remove sharedpool from miner
+* [\#1332](https://github.com/bnb-chain/bsc/pull/1332) core/state: no need to prune block if the same
+
 ## v1.3.7
 FEATURE
 * [\#2067](https://github.com/bnb-chain/bsc/pull/2067) cmd/geth: add check func to validate state scheme
