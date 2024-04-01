@@ -51,7 +51,7 @@ func (w *worker) makeEnv(parent *types.Header, header *types.Header, coinbase co
 
 	// Retrieve the parent state to execute on top and start a prefetcher for
 	// the miner to speed block sealing up a bit
-	topState, err := w.chain.StateAtWithSharedPool(parent.Root)
+	topState, err := w.chain.StateAt(parent.Root)
 	if err != nil {
 		return nil, err
 	}

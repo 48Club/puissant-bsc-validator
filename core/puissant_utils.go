@@ -25,11 +25,7 @@ func CreateGasPool(srcGasPool *GasPool, chainConf *params.ChainConfig, header *t
 	}
 
 	gasPool := new(GasPool).AddGas(header.GasLimit)
-	if chainConf.IsEuler(header.Number) {
-		gasPool.SubGas(params.SystemTxsGas * 3)
-	} else {
-		gasPool.SubGas(params.SystemTxsGas)
-	}
+	gasPool.SubGas(params.SystemTxsGas)
 	return gasPool
 }
 
