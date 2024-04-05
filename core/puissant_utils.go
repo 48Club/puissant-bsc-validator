@@ -9,10 +9,16 @@ import (
 )
 
 func commitTransaction(tx *types.Transaction, chain *BlockChain, chainConfig *params.ChainConfig, coinbase common.Address, envState *state.StateDB, envGasPool *GasPool, envHeader *types.Header, revertIfFailed, gasReq21000 bool, receiptProcessors ...ReceiptProcessor) (*types.Receipt, error) {
-	snap := envState.Snapshot()
+
+	var (
+		snap = envState.Snapshot()
+		gp   = envGasPool.Gas()
+	)
+
 	receipt, err := ApplyTransaction(chainConfig, chain, &coinbase, envGasPool, envState, envHeader, tx, &envHeader.GasUsed, *chain.GetVMConfig(), revertIfFailed, gasReq21000, receiptProcessors...)
 	if err != nil {
 		envState.RevertToSnapshot(snap)
+		envGasPool.SetGas(gp)
 		return nil, err
 	}
 
