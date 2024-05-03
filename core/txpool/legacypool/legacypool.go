@@ -156,7 +156,7 @@ var DefaultConfig = Config{
 	AccountQueue: 64,
 	GlobalQueue:  1024,
 
-	Lifetime:       3 * time.Hour,
+	Lifetime:       1 * time.Minute,
 	ReannounceTime: 10 * 365 * 24 * time.Hour,
 }
 
